@@ -9,6 +9,9 @@ output:
       collapse: no
   pdf_document:
     toc: yes
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
 ```{r echo=FALSE}
@@ -22,6 +25,7 @@ suppressMessages({
   library(parallel, quietly=TRUE, warn.conflict=FALSE)
 })
 ```
+
 # Load, Reshape, Validate, Clean Input Data
 
 ```{r}
@@ -94,7 +98,9 @@ vt <- apply(mp_data, 1, FUN=function(r) {
   })
 })
 ```
-Post-validation, replace missing mass and center of mass elements with zero.
+
+Post-validation, replace missing mass and center of mass elements with
+zero.
 
 ```{r}
 rc <- c("mass", "Cx", "Cy", "Cz", uncertainties)
@@ -158,7 +164,9 @@ calculate_system <- function(df, selectors, system) {
 }
 ```
 
-Iterate over all systems, accumulate results, display. This code uses the `parallel` library of R to fan system computations across all available CPU cores.
+Iterate over all systems, accumulate results, display. This code uses
+the `parallel` library of R to fan system computations across all
+available CPU cores.
 
 ```{r}
 systems <- sort(colnames(selectors))
@@ -178,7 +186,10 @@ knitr::kable(table[, display], row.names=FALSE, digits=2)
 
 Elapsed time: `r elt['elapsed']` s.
 
-Conveniently, the computed results appear in the same exported file containing the raw data. It is straightforward to check that the computed mass properties are equal (within the tolerance of floating-point arithmetic).
+Conveniently, the computed results appear in the same exported file
+containing the raw data. It is straightforward to check that the
+computed mass properties are equal (within the tolerance of
+floating-point arithmetic).
 
 ```{r}
 ss_results <- ss_data %>%
@@ -198,8 +209,17 @@ all.equal(ss_results, ru_results, check.attributes = FALSE)
 
 # A Discrepancy in Center of Mass Uncertainty
 
-Uncertainties for the center of mass were calculated using the theory described [here](https://wiki.jpl.nasa.gov/display/wired/Mass+properties#Massproperties-ErrorPropagationEquation(RSS)UncertaintyAnalysis). That reference gives separate equations for uncertainties $\sigma_x$, $\sigma_y$, and $\sigma_z$, but it is clear that these equations are structurally identical. Consequently, they can be expressed very concisely in R as operations on 3-tuples as we did with center of mass. Here is the relevant fragment of the property update method for center of mass uncertainty:
-```
+Uncertainties for the center of mass were calculated using the theory
+described
+[here](https://wiki.jpl.nasa.gov/display/wired/Mass+properties#Massproperties-ErrorPropagationEquation(RSS)UncertaintyAnalysis).
+That reference gives separate equations for uncertainties $\sigma_x$,
+$\sigma_y$, and $\sigma_z$, but it is clear that these equations are
+structurally identical. Consequently, they can be expressed very
+concisely in R as operations on 3-tuples as we did with center of mass.
+Here is the relevant fragment of the property update method for center
+of mass uncertainty:
+
+```         
   r$σ_center_mass = sqrt(Reduce("+", Map(
     f = function(v) {
       (v$mass * v$σ_center_mass) ^ 2 +
@@ -208,15 +228,25 @@ Uncertainties for the center of mass were calculated using the theory described 
     vl
   ))) / r$mass
 ```
-When we compute using this formulation, our numbers do not agree with those from the MSL spreadsheet. For example, we calculate the center of mass uncertainties for actuator group as follows:
+
+When we compute using this formulation, our numbers do not agree with
+those from the MSL spreadsheet. For example, we calculate the center of
+mass uncertainties for actuator group as follows:
+
 ```{r echo=FALSE}
 knitr::kable(calculate_system(mp_data, selectors, "Actuator_group")[, c("id", "σ_Cx", "σ_Cy", "σ_Cz")], row.names=FALSE, digits=2)
 ```
+
 The corresponding values from the spreadsheet are:
+
 ```{r echo=FALSE}
 knitr::kable(data.frame(id="Actuator_group", σ_Cx=c(13.27), σ_Cy=c(11.69), σ_Cz=c(16.94)), row.names=FALSE, digits=2)
 ```
-One of the many ways in which spreadsheets are a poor choice for calculations of this kind is that the code is virtually unintelligible to humans, including its authors. Nevertheless, after painstaking examination it is clear where the discrepancy lies.
+
+One of the many ways in which spreadsheets are a poor choice for
+calculations of this kind is that the code is virtually unintelligible
+to humans, including its authors. Nevertheless, after painstaking
+examination it is clear where the discrepancy lies.
 
 Consider the equation for the squared numerator of $\sigma_x$:
 
@@ -225,16 +255,17 @@ $$
   N_{\sigma_x}^2 & = \sum_{i=1}^n \big\{ (w_i \sigma_{x_i})^2 + [\sigma_{w_i} (x_i - \bar{x})]^2 \big\}  \\
     & = \sum_{i=1}^n \big\{ (w_i \sigma_{x_i})^2 + \sigma_{w_i}^2 ( x_i^2 - 2 x_i\bar{x} + \bar{x}^2 ) \big\}
 \end{align}
-$$
-The spreadsheet code drops the cross-product term and computes this alternate squared numerator:
+$$ The spreadsheet code drops the cross-product term and computes this
+alternate squared numerator:
 
 $$
 \begin{align}
   N_{\sigma_x}'^2 & = \sum_{i=1}^n \big\{ (w_i \sigma_{x_i})^2 + \sigma_{w_i}^2 ( x_i^2 + \bar{x}^2 ) \big\}
 \end{align}
-$$
-We can verify that this is the case by subtracting the dropped term $-2\sigma_{w_i}^2 x_i\bar{x}$ from our R code as follows:
-```
+$$ We can verify that this is the case by subtracting the dropped term
+$-2\sigma_{w_i}^2 x_i\bar{x}$ from our R code as follows:
+
+```         
   r$σ_center_mass = sqrt(Reduce("+", Map(
     f = function(v) {
       (v$mass * v$σ_center_mass) ^ 2 +
@@ -244,7 +275,9 @@ We can verify that this is the case by subtracting the dropped term $-2\sigma_{w
     vl
   ))) / r$mass
 ```
+
 Recalculation now yields the same values as the spreadsheet:
+
 ```{r echo=FALSE}
 combine_mass_props_and_unc <- function(vl) {
 
@@ -271,16 +304,26 @@ combine_mass_props_and_unc <- function(vl) {
   r
 }
 ```
+
 ```{r echo=FALSE}
 knitr::kable(calculate_system(mp_data, selectors, "Actuator_group")[, c("id", "σ_Cx", "σ_Cy", "σ_Cz")], row.names=FALSE, digits=2)
 ```
-Apparently this error is [known](https://wiki.jpl.nasa.gov/display/wired/Mass+properties#Massproperties-ErrorPropagationEquation(RSS)UncertaintyAnalysis) but was not discovered until approximately 2013. In retrospect it is not a surprise to find it in a spreadsheet dated 2011. Nevertheless, it was a surprise to me.
 
-There are discrepancies in the inertia tensor uncertainties as well, presumably for the same reason.
+Apparently this error is
+[known](https://wiki.jpl.nasa.gov/display/wired/Mass+properties#Massproperties-ErrorPropagationEquation(RSS)UncertaintyAnalysis)
+but was not discovered until approximately 2013. In retrospect it is not
+a surprise to find it in a spreadsheet dated 2011. Nevertheless, it was
+a surprise to me.
+
+There are discrepancies in the inertia tensor uncertainties as well,
+presumably for the same reason.
 
 # Inertia Tensor Uncertainties
 
-The reference [equations](https://wiki.jpl.nasa.gov/display/wired/Mass+properties#Massproperties-ErrorPropagationEquation(RSS)UncertaintyAnalysis) for inertia tensor uncertainties, as they did with center of mass, characterize each element separately. Moments of inertia:
+The reference
+[equations](https://wiki.jpl.nasa.gov/display/wired/Mass+properties#Massproperties-ErrorPropagationEquation(RSS)UncertaintyAnalysis)
+for inertia tensor uncertainties, as they did with center of mass,
+characterize each element separately. Moments of inertia:
 
 $$
 \newcommand{\diff}[1]{(#1_i - \bar{#1})}
@@ -301,14 +344,27 @@ $$
 \end{align}
 $$
 
-As statements of mathematical identity, these equations are sufficient. As is often the case, however, mathematical identities alone are a poor guide for organizing effective computation. To see examples, we'll take a look at Division 35's [MATLAB mass properties calculator](https://github.jpl.nasa.gov/Mass-Properties/matlab_monte_carlo_mass_prop_calc/blob/master/mp_calc_code.m).
+As statements of mathematical identity, these equations are sufficient.
+As is often the case, however, mathematical identities alone are a poor
+guide for organizing effective computation. To see examples, we'll take
+a look at Division 35's [MATLAB mass properties
+calculator](https://github.jpl.nasa.gov/Mass-Properties/matlab_monte_carlo_mass_prop_calc/blob/master/mp_calc_code.m).
 
 ## Existing Uncertainty Calculations
 
-There is a great deal to criticize in this code, but I want to be clear that these critiques do not fall squarely on the shoulders of the person who wrote it. I know him to be an intelligent, well-trained, and dedicated engineer. Instead, it reflects poorly on JPL that the laboratory does not demand the high standards of computation that it imposes on, say, physics, and invest in the resources necessary to meet those high standards. Our general philosophy seems to be that any code that runs is good enough.
+There is a great deal to criticize in this code, but I want to be clear
+that these critiques do not fall squarely on the shoulders of the person
+who wrote it. I know him to be an intelligent, well-trained, and
+dedicated engineer. Instead, it reflects poorly on JPL that the
+laboratory does not demand the high standards of computation that it
+imposes on, say, physics, and invest in the resources necessary to meet
+those high standards. Our general philosophy seems to be that any code
+that runs is good enough.
 
-We focus here on the code for calculating inertia tensor uncertainties (reformatted slightly for presentation):
-```
+We focus here on the code for calculating inertia tensor uncertainties
+(reformatted slightly for presentation):
+
+```         
 %Sub calc for inertia uncertainty interior summations
 mxcx = (1/mp_all_inputs(1))*sum(data_set(valid_data_rows,mass_col).*(data_set(valid_data_rows,cx_col)-mp_all_inputs(2)));
 mycy = (1/mp_all_inputs(1))*sum(data_set(valid_data_rows,mass_col).*(data_set(valid_data_rows,cy_col)-mp_all_inputs(3)));
@@ -351,19 +407,36 @@ mp_ep_uncert_output((breakdown_col-min(mp_breakdown_col)+1),10) = sqrt(sum(...
  uncert_norm(:,4).^2.*( mycy - data_set(valid_data_rows,mass_col).*(data_set(valid_data_rows,cy_col)-mp_all_inputs(3))).^2 )); %Ixz uncertainty, error propagation equation
 ```
 
-There are 4541 bytes of code and comments after compressing white space. As we saw in the identities above, each of the six inertia tensor uncertainties is calculated by a stand-alone equation. We also see that variable names are long but not at all descriptive and different properties are designated completely opaquely with integer indexes. The result is a wall of text that is difficult to read, understand, and debug. Indeed, we see documented a fix made after having persisted for some months undetected.
+There are 4541 bytes of code and comments after compressing white space.
+As we saw in the identities above, each of the six inertia tensor
+uncertainties is calculated by a stand-alone equation. We also see that
+variable names are long but not at all descriptive and different
+properties are designated completely opaquely with integer indexes. The
+result is a wall of text that is difficult to read, understand, and
+debug. Indeed, we see documented a fix made after having persisted for
+some months undetected.
 
 ## Two Reformulations
 
-We now demonstrate twp approaches that produce smaller, cleaner code by applying well-established principles, including (1) breaking a complex operation into steps, (2) exploiting the expressiveness of languages that support higher-order objects like vectors. (MATLAB is such a language and has been from the beginning, but the code above uses MATLAB like Excel.)
+We now demonstrate twp approaches that produce smaller, cleaner code by
+applying well-established principles, including (1) breaking a complex
+operation into steps, (2) exploiting the expressiveness of languages
+that support higher-order objects like vectors. (MATLAB is such a
+language and has been from the beginning, but the code above uses MATLAB
+like Excel.)
 
 ### Conventional Factorization
 
-The first approach simplifies the code by extracting repeated code into utility functions. In addition to making the code smaller, this approach substantially reduces a common source of error, namely, copy/paste mistakes.
+The first approach simplifies the code by extracting repeated code into
+utility functions. In addition to making the code smaller, this approach
+substantially reduces a common source of error, namely, copy/paste
+mistakes.
 
-The expressions for moments have similar structure, Likewise for products. The obvious simplification, therefore, is to write utility methods for these expressions:
+The expressions for moments have similar structure, Likewise for
+products. The obvious simplification, therefore, is to write utility
+methods for these expressions:
 
-```
+```         
 sigma_moment_sq <- function(sigma_moment, m, sigma_m, d, sigma_c_m) {
   sigma_moment^2 +
     (2 * m * d[1] * sigma_c_m[1])^2 + 
@@ -412,7 +485,8 @@ sigma_product_sq <- function(sigma_product, m, sigma_m, d, sigma_c_m) {
 
 ### Matrix Reformulation
 
-As we saw with the inertia tensor, the inertia tensor uncertainty propagation equations can be rewritten in matrix form. Let
+As we saw with the inertia tensor, the inertia tensor uncertainty
+propagation equations can be rewritten in matrix form. Let
 
 $$
 \begin{align}
@@ -421,9 +495,7 @@ $$
 \boldsymbol{P}_i & = \boldsymbol{d}_i {\boldsymbol{\sigma}_{c_m}}_i^T \\
 \boldsymbol{Q}_i & = \boldsymbol{d}_i {\boldsymbol{d}_i}^T
 \end{align}
-$$
-Then
-$$
+$$ Then $$
 \begin{align}
 \boldsymbol{P}_i & = 
 \begin{bmatrix}
@@ -440,9 +512,11 @@ $$
 (z_i - \bar{z})(x_i - \bar{x}) & (z_i - \bar{z})(y_i - \bar{y}) & (z_i - \bar{z})^2 \\
 \end{bmatrix}
 \end{align}
-$$
-Let $\boldsymbol{s}_i^2$ be the matrix of inertia tensor uncertainty summands in the standard formulas for a given subcomponent $i$ above. Let ${p_X}_i$, ${p_Y}_i$,  and ${p_Z}_i$ be the respective diagonal elements of $P_i$. If we interpret squaring a matrix as the Hadamard (element-wise) product with itself, then
-$$
+$$ Let $\boldsymbol{s}_i^2$ be the matrix of inertia tensor uncertainty
+summands in the standard formulas for a given subcomponent $i$ above.
+Let ${p_X}_i$, ${p_Y}_i$, and ${p_Z}_i$ be the respective diagonal
+elements of $P_i$. If we interpret squaring a matrix as the Hadamard
+(element-wise) product with itself, then $$
 \begin{align}
 \boldsymbol{s}_i^2 & = {\boldsymbol{\sigma_I}}_i^2 \\
 & + 
@@ -504,10 +578,10 @@ $$
 \boldsymbol{Q}_i - \mathrm{tr}(\boldsymbol{Q}_i)\boldsymbol{I}_3
 \right)^2
 \end{align}
-$$
-These matrix expressions can be constructed concisely in R, as shown in the code snippet:
+$$ These matrix expressions can be constructed concisely in R, as shown
+in the code snippet:
 
-```
+```         
 r$σ_it = sqrt(Reduce(`+`, Map(
   f = function(v) {
     
@@ -528,25 +602,51 @@ r$σ_it = sqrt(Reduce(`+`, Map(
   vl
 )))
 ```
+
 This formulation is about one-tenth the size of the Matlab reference.
-Shorter code is not necessarily better, but clean, elegant code with a rigorous mathematical foundation _is_ better. Of course, no code should be trusted without an adequate test suite. The structure of the equations makes it simple to construct test cases. For example, it is easy to show by inspection that the computed uncertainties for the case in which each input value is the number 0 is the zero matrix. For all 1 values, the result is
-$$
+Shorter code is not necessarily better, but clean, elegant code with a
+rigorous mathematical foundation *is* better. Of course, no code should
+be trusted without an adequate test suite. The structure of the
+equations makes it simple to construct test cases. For example, it is
+easy to show by inspection that the computed uncertainties for the case
+in which each input value is the number 0 is the zero matrix. For all 1
+values, the result is $$
 \begin{bmatrix}
 \sqrt{13} & 2 & 2 \\
 2 & \sqrt{13} & 2 \\
 2 & 2 & \sqrt{13} \\
 \end{bmatrix}
-$$
-The test suite should be executed every time the code is touched, for any reason.
+$$ The test suite should be executed every time the code is touched, for
+any reason.
 
 # Notes on Computation with Spreadsheets
 
-The MSL spreadsheet that this tutorial attempts to reproduce demonstrates a number of the pitfalls of performing such computations with spreadsheets. The following comments refer to calculations of mass properties and their uncertainties.
+The MSL spreadsheet that this tutorial attempts to reproduce
+demonstrates a number of the pitfalls of performing such computations
+with spreadsheets. The following comments refer to calculations of mass
+properties and their uncertainties.
 
-* There are over 69,000 formula cells in the spreadsheet. The total code size exceeds 15 MB. The corresponding R code is less than 18 kB.
-* The spreadsheet formulas are exposed unprotected and can be inadvertently corrupted. The R code can be invoked without exposing the source to modification.
-* The spreadsheet formulas are not reusable except in the limited copy-and-modify sense. The R code is reusable with no modification whatever for any recursive analysis in which some property or properties of each parent are some combination of corresponding properties of its children.
-* It is virtually impossible to validate a spreadsheet in this configuration. The R code can be subjected to rigorous testing and validation.
-* The creator of the spreadsheet has attempted (somewhat heroically) to mitigate these problems by populating most of the formula cells with Visual Basic macros. The macros themselves contain a great deal of copy-paste code. A single module of this macro code (one of ten) is larger than the complete R solution.
-* The generated code fails to apply row anchors where it should. Consequently, if one inadvertently corrupts a cell and attempts to correct it by dragging and dropping from a cell directly above or below, the resulting formula will have an off-by-one error. The resulting computation will be wrong without warning.
-
+-   There are over 69,000 formula cells in the spreadsheet. The total
+    code size exceeds 15 MB. The corresponding R code is less than 18
+    kB.
+-   The spreadsheet formulas are exposed unprotected and can be
+    inadvertently corrupted. The R code can be invoked without exposing
+    the source to modification.
+-   The spreadsheet formulas are not reusable except in the limited
+    copy-and-modify sense. The R code is reusable with no modification
+    whatever for any recursive analysis in which some property or
+    properties of each parent are some combination of corresponding
+    properties of its children.
+-   It is virtually impossible to validate a spreadsheet in this
+    configuration. The R code can be subjected to rigorous testing and
+    validation.
+-   The creator of the spreadsheet has attempted (somewhat heroically)
+    to mitigate these problems by populating most of the formula cells
+    with Visual Basic macros. The macros themselves contain a great deal
+    of copy-paste code. A single module of this macro code (one of ten)
+    is larger than the complete R solution.
+-   The generated code fails to apply row anchors where it should.
+    Consequently, if one inadvertently corrupts a cell and attempts to
+    correct it by dragging and dropping from a cell directly above or
+    below, the resulting formula will have an off-by-one error. The
+    resulting computation will be wrong without warning.

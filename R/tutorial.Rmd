@@ -10,13 +10,35 @@ output:
       collapse: no
   pdf_document:
     toc: yes
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
 # Overview
 
-Mass rollup (a Master Equipment List or "MEL") is a simple example of a class of computations in which elements are arranged in a tree structure and some property of each element is a computed function of the corresponding values of its child elements. Leaf elements, i.e., those with no children, have values assigned. In many cases (e.g., mass) the combining function is simply the arithmetic sum; in other cases (e.g., higher-order mass properties), the combiner may involve other information such as the geometric relationship between parent and child, or a statistical technique such as root-sum-of-squares (RSS).
+Mass rollup (a Master Equipment List or "MEL") is a simple example of a
+class of computations in which elements are arranged in a tree structure
+and some property of each element is a computed function of the
+corresponding values of its child elements. Leaf elements, i.e., those
+with no children, have values assigned. In many cases (e.g., mass) the
+combining function is simply the arithmetic sum; in other cases (e.g.,
+higher-order mass properties), the combiner may involve other
+information such as the geometric relationship between parent and child,
+or a statistical technique such as root-sum-of-squares (RSS).
 
-The purpose of this tutorial is to introduce an approach to the general class of such problems and to demonstrate a small but highly-general implementation that handles complex cases but is simple to use for simple cases. The fundamental design principle is to strictly separate those parts of the code that are invariant across all applications (e.g., tree traversal) from those that depend on a specific application (e.g., combining mass properties) Throughout the implementation, we will guard against errors that can corrupt the results but often go undetected in less rigorous implementations, e.g., spreadsheets. Of course, code and data will be strictly isolated from each other, a long-standing principle of software quality that is egregiously violated in virtually every spreadsheet.
+The purpose of this tutorial is to introduce an approach to the general
+class of such problems and to demonstrate a small but highly-general
+implementation that handles complex cases but is simple to use for
+simple cases. The fundamental design principle is to strictly separate
+those parts of the code that are invariant across all applications
+(e.g., tree traversal) from those that depend on a specific application
+(e.g., combining mass properties) Throughout the implementation, we will
+guard against errors that can corrupt the results but often go
+undetected in less rigorous implementations, e.g., spreadsheets. Of
+course, code and data will be strictly isolated from each other, a
+long-standing principle of software quality that is egregiously violated
+in virtually every spreadsheet.
 
 ```{r echo = FALSE}
 library(igraph, quietly=TRUE, warn.conflict=FALSE)
@@ -52,18 +74,23 @@ validate_tree <- function(tree) {
   roots[1]
 }
 ```
-Our example problem is rolling up mass by assembly breakdown. For this purpose we use a randomly-generated breakdown tree with hierarchy _system_-_segment_-_element_-_subsystem_-_assembly_-_subassembly_-_part_. The example tree contains
 
-* `r vc[1]` system
-* `r vc[2]` segments
-* `r vc[3]` elements
-* `r vc[4]` subsystems
-* `r vc[5]` assemblies
-* `r vc[6]` subassemblies
-* `r vc[7]` parts
-* `r sum(vc)` total vertices
+Our example problem is rolling up mass by assembly breakdown. For this
+purpose we use a randomly-generated breakdown tree with hierarchy
+*system*-*segment*-*element*-*subsystem*-*assembly*-*subassembly*-*part*.
+The example tree contains
 
-A schematic of the example tree appears below. Details at subassembly and part levels are too fine to be resolved at this size.
+-   `r vc[1]` system
+-   `r vc[2]` segments
+-   `r vc[3]` elements
+-   `r vc[4]` subsystems
+-   `r vc[5]` assemblies
+-   `r vc[6]` subassemblies
+-   `r vc[7]` parts
+-   `r sum(vc)` total vertices
+
+A schematic of the example tree appears below. Details at subassembly
+and part levels are too fine to be resolved at this size.
 
 ```{r echo = FALSE}
 plot(sbs, layout = layout_as_tree(sbs, root  = 2, mode = "in"), vertex.size = 1, vertex.label=NA, edge.arrow.size = 0, asp = .4)
@@ -80,39 +107,89 @@ plot(sbs, layout = layout_as_tree(sbs, root  = 2, mode = "in"), vertex.size = 1,
 
 # Data Structures
 
-We will organize the discussion around two fundamental data structures: a decomposition tree and a property table. In principle, these could be combined, but separating them enables a single decomposition tree to be used for multiple property rollups. Moreover, the relationships expressed in the tree are meaningful in their own right (e.g., physical decomposition) so the principle of separation of concerns applies.
+We will organize the discussion around two fundamental data structures:
+a decomposition tree and a property table. In principle, these could be
+combined, but separating them enables a single decomposition tree to be
+used for multiple property rollups. Moreover, the relationships
+expressed in the tree are meaningful in their own right (e.g., physical
+decomposition) so the principle of separation of concerns applies.
 
 ## The Decomposition Tree
 
-The decomposition tree expresses a set of parent-child relationships. The precise meaning of the relationship is contextual and need not concern us for the moment. There are constraints on the tree, which we now enumerate using the vocabulary of graph theory.
+The decomposition tree expresses a set of parent-child relationships.
+The precise meaning of the relationship is contextual and need not
+concern us for the moment. There are constraints on the tree, which we
+now enumerate using the vocabulary of graph theory.
 
-Mathematical graph theory is the study of pairwise relations between objects. There are two benefits to viewing this problem in graph-theoretic terms. First, it gives us a rigorous and well-understood mathematical framework in which to discuss conditions, operations, etc. Second, and more practically, there are numerous high-quality software graph libraries with reliable and fast algorithms for performing operations on graphs. Fundamentally, however, embedding a real-world problem in a mathematical theory in order to find practical solutions is the essence of engineering. It's what engineers have always done. We're comfortable doing it when the theory is calculus, differential equations, probability, etc. We should be just as comfortable with perhaps unfamiliar mathematical concepts when they match our problems so beautifully.
+Mathematical graph theory is the study of pairwise relations between
+objects. There are two benefits to viewing this problem in
+graph-theoretic terms. First, it gives us a rigorous and well-understood
+mathematical framework in which to discuss conditions, operations, etc.
+Second, and more practically, there are numerous high-quality software
+graph libraries with reliable and fast algorithms for performing
+operations on graphs. Fundamentally, however, embedding a real-world
+problem in a mathematical theory in order to find practical solutions is
+the essence of engineering. It's what engineers have always done. We're
+comfortable doing it when the theory is calculus, differential
+equations, probability, etc. We should be just as comfortable with
+perhaps unfamiliar mathematical concepts when they match our problems so
+beautifully.
 
-We begin by simply listing in natural language some of the constraints that must be satisfied by something we call a decomposition tree. For the purpose of discussion, we employ the relation _is-child-of_, pointing from child to parent. Also note that in graph theory the related objects are called _vertices_ and the connections between vertices are called _edges_.
+We begin by simply listing in natural language some of the constraints
+that must be satisfied by something we call a decomposition tree. For
+the purpose of discussion, we employ the relation *is-child-of*,
+pointing from child to parent. Also note that in graph theory the
+related objects are called *vertices* and the connections between
+vertices are called *edges*.
 
-* Every vertex has most one parent vertex. If this were not true, the mass of any child would be accumulated into more than one parent. This constraint ensures that each supplied mass is accounted for at most once.
-* Every vertex except one, called the _root_, has a parent vertex. This constraint ensures that every supplied mass is counted at least once and the accumulation ends at the root.
-* No vertex can be its own parent. Violating this constraint is nonsensical in the context of mass accounting.
-* If _C_ is a child of _P_, then _P_ is not a child of _C_. (The precise condition is somewhat stronger: if _C_ is a descendant of _P_, then _P_ is not a descendant of _C_, where _is-descendant-of_ is the _transitive closure_ of _is-child-of_.)
+-   Every vertex has most one parent vertex. If this were not true, the
+    mass of any child would be accumulated into more than one parent.
+    This constraint ensures that each supplied mass is accounted for at
+    most once.
+-   Every vertex except one, called the *root*, has a parent vertex.
+    This constraint ensures that every supplied mass is counted at least
+    once and the accumulation ends at the root.
+-   No vertex can be its own parent. Violating this constraint is
+    nonsensical in the context of mass accounting.
+-   If *C* is a child of *P*, then *P* is not a child of *C*. (The
+    precise condition is somewhat stronger: if *C* is a descendant of
+    *P*, then *P* is not a descendant of *C*, where *is-descendant-of*
+    is the *transitive closure* of *is-child-of*.)
 
-The notion of _tree_ is well-defined in graph theory: a tree is a graph that is _connected_ and _acyclic_. One specialization is known as a _directed rooted tree_. A rooted tree is a tree in which a single vertex has been designated as the _root_, and a _directed tree_ is a rooted tree in which all edges are directed either toward or away from the root. For our example, the _is-child-of_ relation points toward the root, but it would work just as well to define an _is-parent-of_ relation that points away.
+The notion of *tree* is well-defined in graph theory: a tree is a graph
+that is *connected* and *acyclic*. One specialization is known as a
+*directed rooted tree*. A rooted tree is a tree in which a single vertex
+has been designated as the *root*, and a *directed tree* is a rooted
+tree in which all edges are directed either toward or away from the
+root. For our example, the *is-child-of* relation points toward the
+root, but it would work just as well to define an *is-parent-of*
+relation that points away.
 
-It is easy to show that a connected, acyclic, directed, rooted tree satisfies the constraints listed above. We will be careful when constructing our example tree to verify that it has all required properties.
+It is easy to show that a connected, acyclic, directed, rooted tree
+satisfies the constraints listed above. We will be careful when
+constructing our example tree to verify that it has all required
+properties.
 
-We will construct our tree from two pieces of information: a vertex list and an edge list. Both are required; otherwise we are assuming that the graph is connected, which is one of the properties we need to verify.
+We will construct our tree from two pieces of information: a vertex list
+and an edge list. Both are required; otherwise we are assuming that the
+graph is connected, which is one of the properties we need to verify.
 
 ### Vertex List
 
-The vertex list is a simple pairing of identifiers and names. Here's a sample of our vertex list:
+The vertex list is a simple pairing of identifiers and names. Here's a
+sample of our vertex list:
 
 ```{r, echo=FALSE}
 knitr::kable(sbs_table[1:100, ], row.names=FALSE)
 ```
-Note that this is simply a flat list of identifiers and names; the hierarchy implied by the identifiers is just that: implicit.
+
+Note that this is simply a flat list of identifiers and names; the
+hierarchy implied by the identifiers is just that: implicit.
 
 ### Edge List
 
-The edge list associates each child ID with a parent ID. Here is a sample:
+The edge list associates each child ID with a parent ID. Here is a
+sample:
 
 ```{r, echo=FALSE}
 knitr::kable(sbs_edges[1:100, c("child", "parent")], row.names=FALSE)
@@ -120,13 +197,27 @@ knitr::kable(sbs_edges[1:100, c("child", "parent")], row.names=FALSE)
 
 ### Discussion
 
-It is important to note that our tree is simply a set of asserted relationships among elements. These relationships need not be essential, invariant properties of the elements themselves. For the purpose of reporting computed quantities like mass, power, cost, etc., we are free to assert arbitrary compositions for any purpose whatever, as long as the resulting graph exhibits the required characteristics.
+It is important to note that our tree is simply a set of asserted
+relationships among elements. These relationships need not be essential,
+invariant properties of the elements themselves. For the purpose of
+reporting computed quantities like mass, power, cost, etc., we are free
+to assert arbitrary compositions for any purpose whatever, as long as
+the resulting graph exhibits the required characteristics.
 
-This is an important detail to keep in mind for implementation. We do not want our rollup code to be entangled with any particular conventions for conveying hierarchy. In fact, there are multiple hierarchies (e.g., authority delegation, physical containment, etc.) for which we might wish to calculate rollups. For this reason we use the simplest possible representation for the tree and project particular uses into that form. Then we can implement the required functionality with care, test it thoroughly, and then reuse it many times with confidence.
+This is an important detail to keep in mind for implementation. We do
+not want our rollup code to be entangled with any particular conventions
+for conveying hierarchy. In fact, there are multiple hierarchies (e.g.,
+authority delegation, physical containment, etc.) for which we might
+wish to calculate rollups. For this reason we use the simplest possible
+representation for the tree and project particular uses into that form.
+Then we can implement the required functionality with care, test it
+thoroughly, and then reuse it many times with confidence.
 
 ## The Property Table
 
-The property table is simply an association between a vertex ID and some property or properties of interest. For the purposes of illustration we assign a random mass to every leaf component (Part). Here is a sample:
+The property table is simply an association between a vertex ID and some
+property or properties of interest. For the purposes of illustration we
+assign a random mass to every leaf component (Part). Here is a sample:
 
 ```{r, echo=FALSE}
 # add leaf masses
@@ -139,15 +230,32 @@ knitr::kable(sbs_table[1:100, ], row.names=FALSE)
 
 # Usage in R
 
-We now show how to calculate a mass rollup using a small library of methods in [R](https://www.r-project.org/) using the [igraph](https://igraph.org/r/) library.
+We now show how to calculate a mass rollup using a small library of
+methods in [R](https://www.r-project.org/) using the
+[igraph](https://igraph.org/r/) library.
 
-R is what is known as a [functional programming](https://en.wikipedia.org/wiki/Functional_programming) language. One characteristic of functional languages is that functions are first-class objects: variables can take functions as values and functions can take functions as arguments. We exploit this property to build our rollup capability with great generality; we apply it to a specific situation by passing it functions that do what we want in this particular circumstance. The pattern repeats at successively lower levels; the functions we pass to our rollup method may themselves be reusable functions configured for a particular purpose by their arguments, etc. The core code is unchanged and therefore more trustworthy.
+R is what is known as a [functional
+programming](https://en.wikipedia.org/wiki/Functional_programming)
+language. One characteristic of functional languages is that functions
+are first-class objects: variables can take functions as values and
+functions can take functions as arguments. We exploit this property to
+build our rollup capability with great generality; we apply it to a
+specific situation by passing it functions that do what we want in this
+particular circumstance. The pattern repeats at successively lower
+levels; the functions we pass to our rollup method may themselves be
+reusable functions configured for a particular purpose by their
+arguments, etc. The core code is unchanged and therefore more
+trustworthy.
 
 ## Constructing the Tree
 
-Assume for the purposes of the example that we have simple R data frames corresponding to the vertex list and edge list as shown above. These could be created by reading tabular files with columns as shown.
+Assume for the purposes of the example that we have simple R data frames
+corresponding to the vertex list and edge list as shown above. These
+could be created by reading tabular files with columns as shown.
 
-The following lines make a graph using standard `igraph` methods. The first constructs a graph from the edge list and the second adds any vertices not already added.
+The following lines make a graph using standard `igraph` methods. The
+first constructs a graph from the edge list and the second adds any
+vertices not already added.
 
 ```{r}
 sbs <- graph_from_edgelist(as.matrix(sbs_edges[, c("child", "parent")]), directed = TRUE)
@@ -162,22 +270,36 @@ sbs
 
 ## Constructing the Property Table
 
-The property table can be created by simply adding a column for mass to the vertex list. For this example, we consider the simplest case in which only leaf vertices contribute mass. A slightly more complex variant is considered later. For this simple case, there are `r length(leaves)` leaf vertices.
+The property table can be created by simply adding a column for mass to
+the vertex list. For this example, we consider the simplest case in
+which only leaf vertices contribute mass. A slightly more complex
+variant is considered later. For this simple case, there are
+`r length(leaves)` leaf vertices.
 
-The rollup algorithm makes no assumptions about the implementation of the property table except that there exist _get_ and _set_ methods for any quantity of interest (e.g., mass) and that we can employ these methods for any vertex by ID. In R, the most natural way to implement the property table is with a _data frame_. The rollup code provides helper methods to construct _get_ and _set_ methods for data frames.
+The rollup algorithm makes no assumptions about the implementation of
+the property table except that there exist *get* and *set* methods for
+any quantity of interest (e.g., mass) and that we can employ these
+methods for any vertex by ID. In R, the most natural way to implement
+the property table is with a *data frame*. The rollup code provides
+helper methods to construct *get* and *set* methods for data frames.
 
-The property table listed above is in fact an R data frame, so we use it as is.
+The property table listed above is in fact an R data frame, so we use it
+as is.
 
 ## Computing the Result
 
-To roll up mass, we need to call a `rollup()` function with four arguments:
+To roll up mass, we need to call a `rollup()` function with four
+arguments:
 
-* the tree specifying rollup relations
-* the property table
-* a property update function to be performed at each vertex
-* a validation function for the property table
+-   the tree specifying rollup relations
+-   the property table
+-   a property update function to be performed at each vertex
+-   a validation function for the property table
 
-We show here how the mass update function is defined. Because we are using the defaults (e.g., data frame with ID column named 'id', combine using addition, the configuration is simple boilerplate. (The only unique content is the word "mass".)
+We show here how the mass update function is defined. Because we are
+using the defaults (e.g., data frame with ID column named 'id', combine
+using addition, the configuration is simple boilerplate. (The only
+unique content is the word "mass".)
 
 ```{r}
 update_mass <- function(df, parent_id, child_ids) {
@@ -185,7 +307,8 @@ update_mass <- function(df, parent_id, child_ids) {
 }
 ```
 
-`update_df_prop_by_id()` is a builtin function that uses other builtin _get_ and _set_ methods for data frames.
+`update_df_prop_by_id()` is a builtin function that uses other builtin
+*get* and *set* methods for data frames.
 
 Similarly the property table validator is more boilerplate:
 
@@ -195,14 +318,18 @@ validate_mass <- function(tree, df) {
 }
 ```
 
-This builtin method ensures that all leaf vertices have a defined initial mass.
+This builtin method ensures that all leaf vertices have a defined
+initial mass.
 
 Here's the call that does the work:
+
 ```{r}
 sbs_table <- rollup(sbs, sbs_table, update_mass, validate_mass)
 ```
 
-R allows anonymous functions, so we could also call `rollup()` like this, without defining named functions `update_mass()` and `validate_mass()`:
+R allows anonymous functions, so we could also call `rollup()` like
+this, without defining named functions `update_mass()` and
+`validate_mass()`:
 
 ```{r}
 sbs_table <- rollup(sbs,
@@ -213,23 +340,34 @@ sbs_table <- rollup(sbs,
                     )
 ```
 
-If all validations pass, `rollup()` returns an updated property table with the non-leaf masses computed. A sample:
+If all validations pass, `rollup()` returns an updated property table
+with the non-leaf masses computed. A sample:
 
 ```{r, echo=FALSE}
 knitr::kable(sbs_table[1:100, ], row.names=FALSE)
 ```
 
-As a check, we note that the sum of the leaf masses is `r sum(sbs_table[is.element(sbs_table$i, leaves), "mass"])` and the total mass computed is `r sbs_table[1, "mass"]`.
+As a check, we note that the sum of the leaf masses is
+`r sum(sbs_table[is.element(sbs_table$i, leaves), "mass"])` and the
+total mass computed is `r sbs_table[1, "mass"]`.
 
 ## Presenting the Result
 
-A common presentation format for a rollup is to present the tree element IDs and names in an indented list, along with the rolled up quantities. Constructing the indented list is a straightforward computation using standard table-building concepts such as _row spanning_. We have provided a convenience method to build an indented list using the [`huxtable`](https://cran.r-project.org/web/packages/huxtable/vignettes/huxtable.html) library. The result can be transformed into LaTeX, HTML, Microsoft Word, Microsoft Excel, Microsoft Powerpoint, RTF and Markdown.
+A common presentation format for a rollup is to present the tree element
+IDs and names in an indented list, along with the rolled up quantities.
+Constructing the indented list is a straightforward computation using
+standard table-building concepts such as *row spanning*. We have
+provided a convenience method to build an indented list using the
+[`huxtable`](https://cran.r-project.org/web/packages/huxtable/vignettes/huxtable.html)
+library. The result can be transformed into LaTeX, HTML, Microsoft Word,
+Microsoft Excel, Microsoft Powerpoint, RTF and Markdown.
 
 ```{r}
 il <- huxtable_from_tree_table(sbs, sbs_table)
 ```
 
 Append the column of rolled-up masses and reduce vertical padding:
+
 ```{r}
 mt <- cbind(il, hux(sbs_table$mass))
 mt <- set_number_format(mt, everywhere, ncol(mt), "%8.2f")
@@ -244,9 +382,14 @@ mt[1:100, ]
 
 ## An Alternative Decomposition
 
-Suppose we would like to aggregate two subsystems, e.g., Assembly 12 (C.1.1.2.2.1) of Subsystem 4 and Assembly 25 (C.1.1.3.2.2) of Subsystem 7, into an artificial aggregation and accumulate its mass under Subsystem 2 (C.1.1.1.2). We'll call it "Aggregation 1" and give it identifier "A.1".
+Suppose we would like to aggregate two subsystems, e.g., Assembly 12
+(C.1.1.2.2.1) of Subsystem 4 and Assembly 25 (C.1.1.3.2.2) of Subsystem
+7, into an artificial aggregation and accumulate its mass under
+Subsystem 2 (C.1.1.1.2). We'll call it "Aggregation 1" and give it
+identifier "A.1".
 
 That is, we would like this slice of the tree:
+
 ```{r echo=FALSE}
 slice_up_from <- function(g, vl) {
   a <- unlist(neighborhood(graph=g, order=1000, nodes=V(g)[vl], mode="out"))
@@ -257,7 +400,9 @@ t <- sbs_table[is.element(sbs_table$id, names(V(s))), c("id", "name")]
 sh <- set_top_padding(set_bottom_padding(huxtable_from_tree_table(s, t), 0), 0)
 sh
 ```
+
 to look like this instead:
+
 ```{r echo=FALSE}
 alt_sbs_table <- rbind(sbs_table, data.frame(id='A.1', name='Aggregation 1', mass=NA))
 alt_sbs <- add_vertices(sbs, 1, name='A.1')
@@ -273,13 +418,15 @@ alt_sh <- set_top_padding(set_bottom_padding(huxtable_from_tree_table(alt_s, alt
 alt_sh
 ```
 
-Because this alternative decomposition contains a new vertex, we create a new property table by copying the original and adding a row:
+Because this alternative decomposition contains a new vertex, we create
+a new property table by copying the original and adding a row:
 
 ```{r}
 alt_sbs_table <- rbind(sbs_table, data.frame(id='A.1', name='Aggregation 1', mass=NA))
 ```
 
-We copy the tree, add the new vertex, remove two edges, and add three new edges:
+We copy the tree, add the new vertex, remove two edges, and add three
+new edges:
 
 ```{r}
 alt_sbs <- add_vertices(sbs, 1, name='A.1')
@@ -305,7 +452,8 @@ all.equal(
 )
 ```
 
-Is the mass of Aggregation 1 the sum of the masses of Assemblies 12 and 25?
+Is the mass of Aggregation 1 the sum of the masses of Assemblies 12 and
+25?
 
 ```{r}
 all.equal(
@@ -319,28 +467,46 @@ all.equal(
 
 The steps to perform a rollup are:
 
-1. Create a rollup graph from a vertex list and edge list. Note that a given tree can be used to roll up multiple properties.
-2. Create a property table with a row for each vertex in the tree and a column for each property to be rolled up.
-3. For each property, construct a property updater and table validator. These are simple boilerplate configurations.
-4. For each property, call `rollup()` with the appropriate updater and validator.
-5. If desired, create a presentation table with `huxtable_from_tree_table()`.
+1.  Create a rollup graph from a vertex list and edge list. Note that a
+    given tree can be used to roll up multiple properties.
+2.  Create a property table with a row for each vertex in the tree and a
+    column for each property to be rolled up.
+3.  For each property, construct a property updater and table validator.
+    These are simple boilerplate configurations.
+4.  For each property, call `rollup()` with the appropriate updater and
+    validator.
+5.  If desired, create a presentation table with
+    `huxtable_from_tree_table()`.
 
 # Implementation in R
 
-This section describes the library implementation in detail. It is not necessary to understand the implementation in order to use it. It is important to note, however that the library described below, despite its brevity, is completely general, and can be used to mechanize any computation whatever in which some properties of a parent depend on the same properties of its children, regardless of how those properties are stored and accessed or the algorithm by which they are combined.
+This section describes the library implementation in detail. It is not
+necessary to understand the implementation in order to use it. It is
+important to note, however that the library described below, despite its
+brevity, is completely general, and can be used to mechanize any
+computation whatever in which some properties of a parent depend on the
+same properties of its children, regardless of how those properties are
+stored and accessed or the algorithm by which they are combined.
 
 ## Tree Traversal
 
 The outer loop of the algorithm does the following:
 
-* for each vertex in the tree
-    * apply a designated property update function involving that vertex and its children
-        
-The outer vertex iteration must be ordered in such a way that no parent is updated before its children.
+-   for each vertex in the tree
+    -   apply a designated property update function involving that
+        vertex and its children
 
-In the case of a simple mass rollup, we need to define a property update method that gets a designated property from each child vertex, combines them using a designated function (usually sum), and updates the designated property in the parent vertex. This property updater will be passed as an argument to the outer loop.
+The outer vertex iteration must be ordered in such a way that no parent
+is updated before its children.
 
-The outermost function we call `rollup()`. Here is its complete source code:
+In the case of a simple mass rollup, we need to define a property update
+method that gets a designated property from each child vertex, combines
+them using a designated function (usually sum), and updates the
+designated property in the parent vertex. This property updater will be
+passed as an argument to the outer loop.
+
+The outermost function we call `rollup()`. Here is its complete source
+code:
 
 ```{r}
 # rollup(tree, update, ds, validate_ds)
@@ -361,18 +527,38 @@ rollup <- function(tree, ds, update, validate_ds) {
 }
 ```
 
-Note that in the call to `rollup()`, two arguments (`update` and `validate_ds`) are functions. The first is how we tell rollup what to do at each vertex.
+Note that in the call to `rollup()`, two arguments (`update` and
+`validate_ds`) are functions. The first is how we tell rollup what to do
+at each vertex.
 
-The first two lines of `rollup()` validate the well-formedness of a tree and a dataset (in our case, the vertex tree and property table) and find the root of the tree. We elaborate on this later.
+The first two lines of `rollup()` validate the well-formedness of a tree
+and a dataset (in our case, the vertex tree and property table) and find
+the root of the tree. We elaborate on this later.
 
-An iteration over the vertices of a tree in which each vertex is visited after its children is called in graph theory a _post-order_ traversal. R's igraph library includes a method called `dfs` (depth-first search) that will compute a post-order traversal.
-The `Reduce()` call uses a well-known idiom in functional programming (sometimes called _fold_) to traverse the graph in post-order and apply, for each vertex, a user-specified function, passing it a dataset upon which to operate and the IDs of the vertex and its children. The user-specified function returns the updated dataset. `Reduce()` accumulates these updates and returns the final dataset, as does `rollup()`.
+An iteration over the vertices of a tree in which each vertex is visited
+after its children is called in graph theory a *post-order* traversal.
+R's igraph library includes a method called `dfs` (depth-first search)
+that will compute a post-order traversal. The `Reduce()` call uses a
+well-known idiom in functional programming (sometimes called *fold*) to
+traverse the graph in post-order and apply, for each vertex, a
+user-specified function, passing it a dataset upon which to operate and
+the IDs of the vertex and its children. The user-specified function
+returns the updated dataset. `Reduce()` accumulates these updates and
+returns the final dataset, as does `rollup()`.
 
-Note that this core capability is implemented in only a handful of lines of code because we effectively exploit the capabilities of `igraph` and the support for functions as function arguments in R. The key is to construct an update function with the signature of `update()`.
+Note that this core capability is implemented in only a handful of lines
+of code because we effectively exploit the capabilities of `igraph` and
+the support for functions as function arguments in R. The key is to
+construct an update function with the signature of `update()`.
 
 ## Tree and Table Validation
 
-Before attempting any computation, `rollup()` ensures, among other things, that the graph purporting to be a tree satisfies all constraints. If this validation fails, the computed result is not trustworthy and the computation is not attempted. For the purposes of illustration, we simply raise an exception and stop. Further diagnosis is possible, e.g., listing the vertices in a cycle.
+Before attempting any computation, `rollup()` ensures, among other
+things, that the graph purporting to be a tree satisfies all
+constraints. If this validation fails, the computed result is not
+trustworthy and the computation is not attempted. For the purposes of
+illustration, we simply raise an exception and stop. Further diagnosis
+is possible, e.g., listing the vertices in a cycle.
 
 Here is `validate_tree()`:
 
@@ -410,11 +596,20 @@ validate_table <- function(tree, table, get_keys, get_prop, op=function(x) is.nu
 }
 ```
 
-`validate_table()` takes a tree, a table, and methods to get the keys for the table, to get a value by key, and to validate such a value. It ensures that the keys in the table match those in the tree, then gets the requested value for each leaf and validates it. The default validator checks to ensure the value is a valid number.
+`validate_table()` takes a tree, a table, and methods to get the keys
+for the table, to get a value by key, and to validate such a value. It
+ensures that the keys in the table match those in the tree, then gets
+the requested value for each leaf and validates it. The default
+validator checks to ensure the value is a valid number.
 
 ## Property Update
 
-The most general implementation of the property update method makes no assumptions about the form of the property table. It expects to be called with _get_ and _set_ methods and a property designation sufficient to get and set values for that property for any specified row of the property table. Here is the complete implementation of `update_prop()`:
+The most general implementation of the property update method makes no
+assumptions about the form of the property table. It expects to be
+called with *get* and *set* methods and a property designation
+sufficient to get and set values for that property for any specified row
+of the property table. Here is the complete implementation of
+`update_prop()`:
 
 ```{r}
 # update_prop(ds, target, sources, set, get, combine = function(l) Reduce('+', l), override = function(ds, target, v) v)
@@ -438,11 +633,21 @@ update_prop <- function(ds, target, sources, set, get,
 }
 ```
 
-The property updater itself knows nothing about parent-child relationships. All it needs to know is a target and a (possibly empty) set of sources on which to operate. When called by `rollup()`, the target is the parent and the sources are the children, but that is a feature of `rollup()`, not `update_prop()`.
+The property updater itself knows nothing about parent-child
+relationships. All it needs to know is a target and a (possibly empty)
+set of sources on which to operate. When called by `rollup()`, the
+target is the parent and the sources are the children, but that is a
+feature of `rollup()`, not `update_prop()`.
 
-The `override()` function provides a mechanism to override any computed value with a user-specified value. For the moment we simply keep the default, which is to use the computed value.
+The `override()` function provides a mechanism to override any computed
+value with a user-specified value. For the moment we simply keep the
+default, which is to use the computed value.
 
-There are various specializations of `update_prop()` for common uses, the simplest of which is a data frame with the element ID in a column with name `id`. For this case `update_df_prop_by_id()` makes use of internally-defined _get_ and _set_ methods. This is the method we used in our example. Its implementation is
+There are various specializations of `update_prop()` for common uses,
+the simplest of which is a data frame with the element ID in a column
+with name `id`. For this case `update_df_prop_by_id()` makes use of
+internally-defined *get* and *set* methods. This is the method we used
+in our example. Its implementation is
 
 ```{r}
 # update_df_prop_by_id(df, target, sources, prop, ...)
@@ -461,9 +666,10 @@ update_df_prop_by_id <- function(df, target, sources, prop, ...) {
 }
 ```
 
-## _Get_ and _Set_ Methods
+## *Get* and *Set* Methods
 
-Convenience methods are provided for property tables implemented as data frames:
+Convenience methods are provided for property tables implemented as data
+frames:
 
 ```{r}
 # get keys from data frame
@@ -542,19 +748,61 @@ huxtable_from_tree_table <- function(tree, tree_table, use.names=TRUE, spacer=NU
   ht
 }
 ```
+
 ## Overrides
 
-The power and flexibility of functional programming allows us an easy method to define an _override_ method whose purpose is to replace an asserted or computed set of values at a vertex with some other value, perhaps computed from the former. For example, a simple affine transform (multiplier $m$ and offset $b$) would allow us to override a computed value $x$ with a scaled value ($m > 0$, $b = 0$), a constant offset ($m = 1$), a fixed value ($m = 0$), or some combination thereof. Named sets of such transformations could be applied as a group, allowing distinct options in a trade, for example, to be separately analyzed.
+The power and flexibility of functional programming allows us an easy
+method to define an *override* method whose purpose is to replace an
+asserted or computed set of values at a vertex with some other value,
+perhaps computed from the former. For example, a simple affine transform
+(multiplier $m$ and offset $b$) would allow us to override a computed
+value $x$ with a scaled value ($m > 0$, $b = 0$), a constant offset
+($m = 1$), a fixed value ($m = 0$), or some combination thereof. Named
+sets of such transformations could be applied as a group, allowing
+distinct options in a trade, for example, to be separately analyzed.
 
-We will see an application of overrides in the mass properties example. The default override function simply returns its input value unmodified.
+We will see an application of overrides in the mass properties example.
+The default override function simply returns its input value unmodified.
 
 # Advanced Example: Mass Properties
 
-For this example we reuse the system breakdown tree but our property table now includes the following parameters: mass ("mass"), center of mass ("Cx", "Cy", "Cz"), and upper triangle of inertia tensor ("Ixx", "Iyy", "Izz", "Ixy", "Ixz", "Iyz"). We can use `rollup()` and `update_prop()` as is, but we will need to create specialized _get_ and _set_ methods that operate on mass property sets and a specialized combiner update for such sets.
+For this example we reuse the system breakdown tree but our property
+table now includes the following parameters: mass ("mass"), center of
+mass ("Cx", "Cy", "Cz"), and upper triangle of inertia tensor ("Ixx",
+"Iyy", "Izz", "Ixy", "Ixz", "Iyz"). We can use `rollup()` and
+`update_prop()` as is, but we will need to create specialized *get* and
+*set* methods that operate on mass property sets and a specialized
+combiner update for such sets.
 
-Although the theory of mass properties is straightforward, there are minor complications that arise in practice. One is that there are  [two conventions](https://wiki.jpl.nasa.gov/display/wired/Mass+properties#Massproperties-Inertia) for defining products of inertia. In the _negative_ convention, the off-diagonal elements of the inertia tensor are the products of inertia. In the _positive_ convention, they are the negated products of inertia. We could simply require that the user adhere to one convention or the other, but in real-world practice observations of mass properties may come from different sources (e.g., CAD tools, measurement devices) with the conventions of those sources. Rather than burden the user with converting, we simply add a `POIconv` indicator (with values `+` or `-`) to each mass property set, indicating its convention. The software will convert as necessary.
+Although the theory of mass properties is straightforward, there are
+minor complications that arise in practice. One is that there are [two
+conventions](https://wiki.jpl.nasa.gov/display/wired/Mass+properties#Massproperties-Inertia)
+for defining products of inertia. In the *negative* convention, the
+off-diagonal elements of the inertia tensor are the products of inertia.
+In the *positive* convention, they are the negated products of inertia.
+We could simply require that the user adhere to one convention or the
+other, but in real-world practice observations of mass properties may
+come from different sources (e.g., CAD tools, measurement devices) with
+the conventions of those sources. Rather than burden the user with
+converting, we simply add a `POIconv` indicator (with values `+` or `-`)
+to each mass property set, indicating its convention. The software will
+convert as necessary.
 
-Another complication is that there may be small parts (e.g., fasteners) for which we believe the inertia is negligible. We could, of course, assert its moments and products of inertia to be zero, but this leads to a dilemma. It is sound practice for computational software to validate its inputs; in this application the validation should ensure that every inertia tensor satisfies the mathematical constraints that ensure it corresponds to a physically-realizable object. An identically-zero inertia tensor violates those constraints, so we either relax the checking or indicate explicitly that the inertia of this object is excluded from the computation. This is, of course, arithmetically equivalent to adding an identically-zero inertia tensor, but is a superior approach because it explicitly indicates our intent and detects other invalid inertia tensors that arise from errors and omissions, not intent. We simply add an `Ipoint` boolean property to indicate that this mass property set represents a point mass.
+Another complication is that there may be small parts (e.g., fasteners)
+for which we believe the inertia is negligible. We could, of course,
+assert its moments and products of inertia to be zero, but this leads to
+a dilemma. It is sound practice for computational software to validate
+its inputs; in this application the validation should ensure that every
+inertia tensor satisfies the mathematical constraints that ensure it
+corresponds to a physically-realizable object. An identically-zero
+inertia tensor violates those constraints, so we either relax the
+checking or indicate explicitly that the inertia of this object is
+excluded from the computation. This is, of course, arithmetically
+equivalent to adding an identically-zero inertia tensor, but is a
+superior approach because it explicitly indicates our intent and detects
+other invalid inertia tensors that arise from errors and omissions, not
+intent. We simply add an `Ipoint` boolean property to indicate that this
+mass property set represents a point mass.
 
 Here's a sample of our initial mass property table:
 
@@ -665,11 +913,16 @@ update_mass_props <- function(ds, parent_key, child_keys, ...) {
 }
 ```
 
-Of course, we still have to write `df_set_mass_props()`, `df_get_mass_props()`, and `combine_mass_props()`.
+Of course, we still have to write `df_set_mass_props()`,
+`df_get_mass_props()`, and `combine_mass_props()`.
 
-## _Get_ and _Set_ Methods
+## *Get* and *Set* Methods
 
-We could, as many spreadsheet applications do, write a combiner for each individual property, but the implementation is cleaner if we operate on mass as a scalar, center of mass as a vector, and inertia tensor as a matrix. So our `df_get_mass_props()` builds those objects from values in the property table and adds them to a named list:
+We could, as many spreadsheet applications do, write a combiner for each
+individual property, but the implementation is cleaner if we operate on
+mass as a scalar, center of mass as a vector, and inertia tensor as a
+matrix. So our `df_get_mass_props()` builds those objects from values in
+the property table and adds them to a named list:
 
 ```{r}
 df_get_mass_props <- function(df, id) {
@@ -766,18 +1019,23 @@ combine_mass_props <- function(vl) {
   r
 }
 ```
-To explain the inertia tensor expression, we show the correspondence between R code and the theoretical [exposition](https://en.wikipedia.org/wiki/Parallel_axis_theorem#Moment_of_inertia_matrix) of the parallel axis theorem in matrix form:
+
+To explain the inertia tensor expression, we show the correspondence
+between R code and the theoretical
+[exposition](https://en.wikipedia.org/wiki/Parallel_axis_theorem#Moment_of_inertia_matrix)
+of the parallel axis theorem in matrix form:
 
 | R code | theory |
-|------|--------|
-| `d <- r$center_mass - v$center_mass` |  $\mathbf{d} = \mathbf{R} - \mathbf{S}$ |
-| `ddt <- outer(d, d)` |  $[{\mathbf{d}}{\mathbf{d}}^T]$ |
+|-------------------------------|-----------------------------------------|
+| `d <- r$center_mass - v$center_mass` | $\mathbf{d} = \mathbf{R} - \mathbf{S}$ |
+| `ddt <- outer(d, d)` | $[{\mathbf{d}}{\mathbf{d}}^T]$ |
 | `d_ss2 <- ddt - sum(diag(ddt)) * diag(3)` | $[d]^2 = [{\mathbf{d}}{\mathbf{d}}^T] - |\mathbf{d}|^2 [E_3]$<br>$|\mathbf{d}|^2 = \mathrm{tr}{[{\mathbf{d}}{\mathbf{d}}^T]}$ |
-| `v$inertia - v$mass * d_ss2` | $[I_R] - M [d]^2$
+| `v$inertia - v$mass * d_ss2` | $[I_R] - M [d]^2$ |
 
 ## Tree and Table Validation
 
-Tree validation is unchanged. For the property table, we define a validator for a single mass property set:
+Tree validation is unchanged. For the property table, we define a
+validator for a single mass property set:
 
 ```{r}
 validate_mass_props <- function(mp) {
@@ -812,7 +1070,9 @@ validate_mass_props <- function(mp) {
 }
 ```
 
-Our table validator `validate_mass_props_table()` calls `validate_mass_props()`
+Our table validator `validate_mass_props_table()` calls
+`validate_mass_props()`
+
 ```{r}
 validate_mass_props_table <- function(tree, df) {
   validate_table(tree, df, df_get_ids, df_get_mass_props, validate_mass_props)
@@ -833,20 +1093,30 @@ A sample of the result:
 knitr::kable(sbs_table[1:100, ], row.names=FALSE, digits=3)
 ```
 
-Finally, we apply our mass properties validation to the computed root properties:
+Finally, we apply our mass properties validation to the computed root
+properties:
 
 ```{r}
 validate_mass_props(df_get_mass_props(sbs_table, "C.1"))
 ```
 
-It is worth noting that to produce this example using conventional spreadsheet techniques requires 10 summing formulas for each non-leaf element and 9 intermediate result formulas for each leaf element: a total of `r sprintf("%d", 10 * nrow(sbs_table) - length(leaves))` unique formulas, every one of which must be correct. It is for all practical purposes impossible to validate such a computation. In the functional technique employed here, the formulas are expressed exactly once, concisely. Consequently all results are correct or all are incorrect. We can verify correctness of the code with test data and then rely on it.
+It is worth noting that to produce this example using conventional
+spreadsheet techniques requires 10 summing formulas for each non-leaf
+element and 9 intermediate result formulas for each leaf element: a
+total of `r sprintf("%d", 10 * nrow(sbs_table) - length(leaves))` unique
+formulas, every one of which must be correct. It is for all practical
+purposes impossible to validate such a computation. In the functional
+technique employed here, the formulas are expressed exactly once,
+concisely. Consequently all results are correct or all are incorrect. We
+can verify correctness of the code with test data and then rely on it.
 
 ## Results Validation
 
 ### Comparison with Analytical Result
 
-Consider the problem of an object with mass 5.0 at the origin surrounded by eight objects with mass 2.0 centered at Cartesian coordinates $(±1, ±1, ±1)$. Let the inertia tensor of the central object
-$$
+Consider the problem of an object with mass 5.0 at the origin surrounded
+by eight objects with mass 2.0 centered at Cartesian coordinates
+$(±1, ±1, ±1)$. Let the inertia tensor of the central object $$
 \newcommand{\Ic}{\begin{bmatrix} 80 & -4 & -24 \\ -4 & 80 & -24 \\ -24 & -24 & 75 \end{bmatrix}}
 I_c = \Ic
 $$
@@ -858,23 +1128,28 @@ $$
 I_p = \Ip .
 $$
 
-The mass of the aggregate is $5.0 + 8 \cdot 2.0 = 21.0$ and its center of mass is, by symmetry, the origin. Its inertia tensor can be calculated as follows:
+The mass of the aggregate is $5.0 + 8 \cdot 2.0 = 21.0$ and its center
+of mass is, by symmetry, the origin. Its inertia tensor can be
+calculated as follows:
 
-The squared skew-symmetric matrix for the object at $\mathbf{d}_1 = \begin{pmatrix} x_1 & y_1 & z_1 \end{pmatrix}^T = \begin{pmatrix} 1 & 1 & 1 \end{pmatrix}^T$, for example, can be seen by inspection to be
+The squared skew-symmetric matrix for the object at
+$\mathbf{d}_1 = \begin{pmatrix} x_1 & y_1 & z_1 \end{pmatrix}^T = \begin{pmatrix} 1 & 1 & 1 \end{pmatrix}^T$,
+for example, can be seen by inspection to be
 
 $$
 [\mathbf{d}_1]^2
 = \begin{bmatrix} -y_1^2 - z_1^2 & x_1y_1 & x_1z_1 \\ y_1x_1 & -x_1^2 - z_1^2 & y_1z_1 \\ z_1x_1 & z_1y_1 & -x_1^2 - y_1^2 \end{bmatrix} 
 = \begin{bmatrix} -2 & 1 & 1 \\ 1 & -2 & 1 \\ 1 & 1 & -2 \end{bmatrix} .
-$$
-It is a straightforward exercise to show that the sum of the eight squared skew-symmetric matrices for the peripheral objects satisfies
+$$ It is a straightforward exercise to show that the sum of the eight
+squared skew-symmetric matrices for the peripheral objects satisfies
 
 $$
 \newcommand{\sumsssm}{\sum_{i = 1}^8 [\mathbf{d}_i]^2 }
 \newcommand{\sumsssmv}{\begin{bmatrix} -16 & 0 & 0 \\ 0 & -16 & 0 \\ 0 & 0 & -16 \end{bmatrix}}
 \sumsssm = \sumsssmv .
-$$
-The squared skew-symmetric matrix for the central object is identically zero. Consequently, we can easily calculate the aggregate inertia tensor:
+$$ The squared skew-symmetric matrix for the central object is
+identically zero. Consequently, we can easily calculate the aggregate
+inertia tensor:
 
 $$
 \begin{align}
@@ -885,7 +1160,9 @@ I_a
 \end{align}
 $$
 
-We assemble a test table and tree. We insert two intermediate aggregates (A.2 and A.3) to check that recursion works properly:
+We assemble a test table and tree. We insert two intermediate aggregates
+(A.2 and A.3) to check that recursion works properly:
+
 ```{r}
 test_table <- read.csv("../mp-test-table.csv")
 test_tree <- test_tree <- graph_from_edgelist(
@@ -904,20 +1181,26 @@ The result:
 test_result <-rollup(test_tree, test_table, update_mass_props, validate_mass_props_table)
 knitr::kable(test_result)
 ```
+
 The top-level mass properties:
+
 ```{r}
 df_get_mass_props(test_result, 'A.1')
 ```
 
 ### Order Independence
 
-It should be the case that the mass properties of the root element depend only on the mass properties of the leaves, and not on any proper arrangement into intermediate aggregates. Let's check if that's true. First we make a new property table with only the root and all leaves:
+It should be the case that the mass properties of the root element
+depend only on the mass properties of the leaves, and not on any proper
+arrangement into intermediate aggregates. Let's check if that's true.
+First we make a new property table with only the root and all leaves:
 
 ```{r}
 flat_sbs_table <- sbs_table[is.element(sbs_table$id, c("C.1", leaves)), ]
 ```
 
-Now create the flattened tree with an edge from every leaf directly to the root:
+Now create the flattened tree with an edge from every leaf directly to
+the root:
 
 ```{r}
 flat_sbs_edgelist <- matrix(cbind(leaves, rep("C.1", length(leaves))), byrow=FALSE, ncol=2)
@@ -930,14 +1213,18 @@ Rollup is exactly as before:
 flat_sbs_table <- rollup(flat_sbs, flat_sbs_table, update_mass_props, validate_mass_props_table)
 ```
 
-Check if the root properties are within double-precision tolerance (`r .Machine$double.eps ^ 0.5`) of those before:
+Check if the root properties are within double-precision tolerance
+(`r .Machine$double.eps ^ 0.5`) of those before:
 
 ```{r}
 all.equal(df_get_mass_props(sbs_table, "C.1"), df_get_mass_props(flat_sbs_table, "C.1"))
 ```
+
 ## Threats and Opportunities
 
-We can use the override feature described in the Implementation section to implement a simple but powerful mechanism for threats and opportunities.
+We can use the override feature described in the Implementation section
+to implement a simple but powerful mechanism for threats and
+opportunities.
 
 First, we define a simple override method:
 
@@ -969,9 +1256,14 @@ override_mass_props <- function(ol, ds, id, mp) {
 }
 ```
 
-For a given vertex ID, `override_mass_props()` finds all overrides that apply to that ID, and for each, applies the specified transformation to the mass. If requested, it also applies a scaling of the inertial tensor.
+For a given vertex ID, `override_mass_props()` finds all overrides that
+apply to that ID, and for each, applies the specified transformation to
+the mass. If requested, it also applies a scaling of the inertial
+tensor.
 
-In the following examples we compare a set of overrides to these baseline property sets:
+In the following examples we compare a set of overrides to these
+baseline property sets:
+
 ```{r, echo=FALSE}
 baseline=c("C.1", "C.1.1.1.1.3", "C.1.1.1.2.1")
 knitr::kable(sbs_table[is.element(sbs_table$id, baseline), ], digits=3)
@@ -980,12 +1272,14 @@ knitr::kable(sbs_table[is.element(sbs_table$id, baseline), ], digits=3)
 ### Example 1: Descope Assembly 3
 
 For this example, our overrides list is
+
 ```{r, echo=FALSE}
 overrides <- read.csv("../jpl-wbs/overrides.csv", strip.white=TRUE, stringsAsFactors=FALSE)
 knitr::kable(overrides[overrides$example == 1, ])
 ```
 
-We can update our definition of `update_mass_props()` or simply call `rollup()` with an anonymous update method as follows:
+We can update our definition of `update_mass_props()` or simply call
+`rollup()` with an anonymous update method as follows:
 
 ```{r}
 sbs_table_ex_1 <- rbind(sbs_table) # copy
@@ -1003,7 +1297,9 @@ sbs_table_ex_1 <-
            ),
          validate_mass_props_table)
 ```
+
 The result:
+
 ```{r, echo=FALSE}
 knitr::kable(sbs_table_ex_1[is.element(sbs_table_ex_1$id, baseline), ], digits=3)
 ```
@@ -1120,7 +1416,8 @@ knitr::kable(sbs_table_ex_5[is.element(sbs_table_ex_5$id, baseline), ], digits=3
 
 ### Example 6: Assembly 3/4 Trade Option 4
 
-This example is identical to to Example 1 but it makes the choice between Assemblies 3 and 4 explicit. Overrides list:
+This example is identical to to Example 1 but it makes the choice
+between Assemblies 3 and 4 explicit. Overrides list:
 
 ```{r, echo=FALSE}
 knitr::kable(overrides[overrides$example == 6, ])
@@ -1145,9 +1442,15 @@ sbs_table_ex_6 <-
          validate_mass_props_table)
 knitr::kable(sbs_table_ex_6[is.element(sbs_table_ex_6$id, baseline), ], digits=3)
 ```
+
 ## Subtracting Tare Properties
 
-Measuring the mass properties of an object empirically often involves the use of a fixture that attaches the object to the measuring device. The measurement therefore includes contributions from the object and the fixture. Measuring the fixture alone will give its contribution--called the _tare_. We can reformulate the mass property combining equations to yield the difference between the properties of the object and the tare:
+Measuring the mass properties of an object empirically often involves
+the use of a fixture that attaches the object to the measuring device.
+The measurement therefore includes contributions from the object and the
+fixture. Measuring the fixture alone will give its contribution--called
+the *tare*. We can reformulate the mass property combining equations to
+yield the difference between the properties of the object and the tare:
 
 ```{r}
 # subtract_tare(pm, pf)
@@ -1179,7 +1482,10 @@ subtract_tare <- function(pm, pf) {
 }
 ```
 
-In our mass properties example, Component C.1 has two children: C.1.1 and C.1.2. If we consider C.1.1 to be a fixture, we can subtract its properties from those of C.1 and the result should equal the properties of C.1.2.
+In our mass properties example, Component C.1 has two children: C.1.1
+and C.1.2. If we consider C.1.1 to be a fixture, we can subtract its
+properties from those of C.1 and the result should equal the properties
+of C.1.2.
 
 ```{r}
 po <- subtract_tare(df_get_mass_props(sbs_table, 'C.1'), df_get_mass_props(sbs_table, 'C.1.1'))
@@ -1192,7 +1498,11 @@ all.equal(po, df_get_mass_props(sbs_table, 'C.1.2'))
 
 # Advanced Example: Monte Carlo Simulation
 
-It is a straightforward extension of existing capabilities to enable Monte Carlo simulation. We simply need a method that, given the elements of a single rollup, will repeatedly perturb all leaf elements, perform a rollup on the perturbed data, and collect the resulting top-level elements. Here is one such method:
+It is a straightforward extension of existing capabilities to enable
+Monte Carlo simulation. We simply need a method that, given the elements
+of a single rollup, will repeatedly perturb all leaf elements, perform a
+rollup on the perturbed data, and collect the resulting top-level
+elements. Here is one such method:
 
 ```{r}
 library(parallel)
@@ -1236,8 +1546,10 @@ monte_carlo_sample_rollup <- function(n, update, tree, table, get, set, perturb,
 
 ## Perturbing Mass Properties
 
-The sampling method above is general. As with `rollup()`, we configure it do to what we want by passing it functions as arguments.
-We have all the pieces we need for Monte Carlo simulation for mass properties except `perturb_mass_props()`. Here is a simple implementation:
+The sampling method above is general. As with `rollup()`, we configure
+it do to what we want by passing it functions as arguments. We have all
+the pieces we need for Monte Carlo simulation for mass properties except
+`perturb_mass_props()`. Here is a simple implementation:
 
 ```{r}
 perturb_mass_props <- function(mp,
@@ -1272,51 +1584,77 @@ perturb_center_mass <- function(center_mass, x_sd, y_sd, z_sd) {
 }
 ```
 
-Perturbing the inertia tensor is not so straightforward because an inertia tensor is a real symmetric positive definite matrix whose eigenvalues (principal moments of inertia) satisfy the so-called triangle inequalities:
+Perturbing the inertia tensor is not so straightforward because an
+inertia tensor is a real symmetric positive definite matrix whose
+eigenvalues (principal moments of inertia) satisfy the so-called
+triangle inequalities:
 
 $$ I_{xx} \leq I_{yy} + I_{zz} \\
    I_{yy} \leq I_{xx} + I_{zz} \\
    I_{zz} \leq I_{xx} + I_{yy} $$
-   
-Arbitrary perturbations of the elements of the inertia tensor $I$ may violate any of these constraints. As a simple example, we present a method that avoids this problem.
 
-The moments of a homogeneous unit mass [cuboid](https://en.wikipedia.org/wiki/List_of_moments_of_inertia) of dimensions $a$, $b$, and $c$ about its center of mass satisfy
+Arbitrary perturbations of the elements of the inertia tensor $I$ may
+violate any of these constraints. As a simple example, we present a
+method that avoids this problem.
+
+The moments of a homogeneous unit mass
+[cuboid](https://en.wikipedia.org/wiki/List_of_moments_of_inertia) of
+dimensions $a$, $b$, and $c$ about its center of mass satisfy
 
 $$ \begin{bmatrix} I_{xx} \\ I_{yy} \\ I_{zz} \end{bmatrix} = M \begin{bmatrix}a^2 \\ b^2 \\ c^2 \end{bmatrix} $$
 where
 
 $$ M = \frac{1}{12} \begin{bmatrix} 0 & 1 & 1 \\ 1 & 0 & 1 \\ 1 & 1 & 0 \end{bmatrix} $$
-The inertia tensor $I$ for this cuboid in the coordinate system of its axes is
+The inertia tensor $I$ for this cuboid in the coordinate system of its
+axes is
 
 $$ I = \begin{bmatrix} I_{xx} & 0 & 0 \\ 0 & I_{yy} & 0 \\ 0 & 0 & I_{zz} \end{bmatrix} $$
 
-The structure of $M$ ensures that the principal moments are positive and satisfy the triangle inequalities. $I$ is positive definite because its eigenvalues are positive.
+The structure of $M$ ensures that the principal moments are positive and
+satisfy the triangle inequalities. $I$ is positive definite because its
+eigenvalues are positive.
 
-Let $R$ be a unitary $3 \times 3$ matrix. We can rotate the inertia tensor $I$ as follows:
+Let $R$ be a unitary $3 \times 3$ matrix. We can rotate the inertia
+tensor $I$ as follows:
 
 $$ A = R \begin{bmatrix} I_{xx} & 0 & 0 \\ 0 & I_{yy} & 0 \\ 0 & 0 & I_{zz} \end{bmatrix} R^T $$
 
-Rotations preserve eigenvalues, so every such $A$ is a valid inertia tensor. We can use these facts to create a procedure for perturbing an inertia tensor on physical principles.
+Rotations preserve eigenvalues, so every such $A$ is a valid inertia
+tensor. We can use these facts to create a procedure for perturbing an
+inertia tensor on physical principles.
 
-Given any arbitrary inertia tensor $A$, we can find a similarity transform such that
+Given any arbitrary inertia tensor $A$, we can find a similarity
+transform such that
 
 $$ A = R D R^{-1} $$
 
-where $D$ is a diagonal matrix whose diagonal elements are eigenvalues (principal moments) of $A$ and $R$ is a matrix whose columns are eigenvectors of $A$. $A$ is real and symmetric and therefore its eigenvectors are mutually orthogonal. Every scalar multiple of an eigenvector of $A$ is also an eigenvector of $A$, so it is always possible to scale the columns of $R$ such that $\| R \| = 1$, and therefore $R$ is unitary, i.e., $R^T = R^{-1}$.
+where $D$ is a diagonal matrix whose diagonal elements are eigenvalues
+(principal moments) of $A$ and $R$ is a matrix whose columns are
+eigenvectors of $A$. $A$ is real and symmetric and therefore its
+eigenvectors are mutually orthogonal. Every scalar multiple of an
+eigenvector of $A$ is also an eigenvector of $A$, so it is always
+possible to scale the columns of $R$ such that $\| R \| = 1$, and
+therefore $R$ is unitary, i.e., $R^T = R^{-1}$.
 
-We can solve for the dimensions of the equivalent cuboid whose inertia tensor is $D$ as
+We can solve for the dimensions of the equivalent cuboid whose inertia
+tensor is $D$ as
 
 $$ \begin{bmatrix}a^2 \\ b^2 \\ c^2 \end{bmatrix} = M^{-1} \begin{bmatrix} I_{xx} \\ I_{yy} \\ I_{zz} \end{bmatrix} $$
-We can then create a perturbed $A'$ that satisfies all constraints by perturbing the dimensions of the equivalent cuboid and/or perturbing the rotation matrix $R$.
+We can then create a perturbed $A'$ that satisfies all constraints by
+perturbing the dimensions of the equivalent cuboid and/or perturbing the
+rotation matrix $R$.
 
-Perturbing the cuboid dimensions is straightforward; all that is required is that the values be positive. We then form
+Perturbing the cuboid dimensions is straightforward; all that is
+required is that the values be positive. We then form
 
 $$ \begin{bmatrix} I'_{xx} \\ I'_{yy} \\ I'_{zz} \end{bmatrix} = M \begin{bmatrix} a'^2 \\ b'^2 \\ c'^2 \end{bmatrix} $$
 
-We cannot arbitrarily perturb $R$ because it is necessary for the perturbed $R'$ to be unitary. We note, however, the product of two rotation matrices is a rotation matrix. Consequently, we can define
+We cannot arbitrarily perturb $R$ because it is necessary for the
+perturbed $R'$ to be unitary. We note, however, the product of two
+rotation matrices is a rotation matrix. Consequently, we can define
 
-$$ R' = R Z $$
-where $Z$ is a "small" random rotation matrix. The code below illustrates a method for generating such a rotation.
+$$ R' = R Z $$ where $Z$ is a "small" random rotation matrix. The code
+below illustrates a method for generating such a rotation.
 
 Finally,
 
@@ -1410,40 +1748,62 @@ perturb_inertia_tensor <- function(it,
 }
 
 ```
+
 ```{r, echo=FALSE}
 A <- 1000 * random_mass_props()$inertia
 ```
+
 As an example, consider the inertia tensor
+
 ```{r}
 A
 ```
+
 We can perturb its equivalent cuboid dimensions only:
+
 ```{r}
 perturb_inertia_tensor(A, x_sd=0.1, x_min=0.001, y_sd=0.1, y_min=0.001, z_sd=0.1, z_min=0.001)
 ```
+
 We can perturb its rotation only:
+
 ```{r}
 perturb_inertia_tensor(A, r_sd=0.001)
 ```
+
 We can perturb both:
+
 ```{r}
 perturb_inertia_tensor(A, x_sd=0.1, x_min=0.001, y_sd=0.1, y_min=0.001, z_sd=0.1, z_min=0.001,
                        r_sd=0.001)
 ```
 
-
 Default perturbation arguments leave the tensor unchanged:
+
 ```{r}
 all.equal(A, perturb_inertia_tensor(A))
 ```
 
-Note: This method generates matrices that satisfy the physical and mathematical constraints on an inertia tensor; it has a meaningful interpretation in terms of the dimensions of an equivalent homogeneous cuboid and a rotation of its principal axes. Whether it is appropriate for Monte Carlo analysis of inertial properties of actual spacecraft depends on the precise meaning of uncertainty in moments and products of inertia and is best answered by mechanical engineers and/or physicists.
+Note: This method generates matrices that satisfy the physical and
+mathematical constraints on an inertia tensor; it has a meaningful
+interpretation in terms of the dimensions of an equivalent homogeneous
+cuboid and a rotation of its principal axes. Whether it is appropriate
+for Monte Carlo analysis of inertial properties of actual spacecraft
+depends on the precise meaning of uncertainty in moments and products of
+inertia and is best answered by mechanical engineers and/or physicists.
 
-Note: The claim that this algorithm produces valid inertia tensors is proven above (some details are left to reader) but also explicitly verified for each perturbation because our mass properties rollup validates every input before calculation.
+Note: The claim that this algorithm produces valid inertia tensors is
+proven above (some details are left to reader) but also explicitly
+verified for each perturbation because our mass properties rollup
+validates every input before calculation.
 
-Note: The decomposition of each inertia tensor into its equivalent cuboid and rotation is invariant during Monte Carlo sampling. An obvious potential performance enhancement would be to cache those values before the main iteration. The required modifications are simple but do not contribute to clarity of exposition.
+Note: The decomposition of each inertia tensor into its equivalent
+cuboid and rotation is invariant during Monte Carlo sampling. An obvious
+potential performance enhancement would be to cache those values before
+the main iteration. The required modifications are simple but do not
+contribute to clarity of exposition.
 
-##  Output
+## Output
 
 ### Samples
 
@@ -1469,11 +1829,14 @@ elt <- system.time(
 )
 knitr::kable(samples, digits=3)
 ```
+
 ```{r echo = FALSE}
 # Elapsed time: 973.594 s for 1000 Monte Carlo samples, approximately 1.0 sample/s.
 ```
 
-Elapsed time: `r elt['elapsed']` s for `r nrow(samples)` Monte Carlo samples, approximately `r sprintf('%.1f', nrow(samples)/elt['elapsed'])` sample/s.
+Elapsed time: `r elt['elapsed']` s for `r nrow(samples)` Monte Carlo
+samples, approximately `r sprintf('%.1f', nrow(samples)/elt['elapsed'])`
+sample/s.
 
 ### Statistical Summary
 
