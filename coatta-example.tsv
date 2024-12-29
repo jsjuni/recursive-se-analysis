@@ -1,0 +1,4 @@
+id	mass	Cx	Cy	Cz	Ixx	Iyy	Izz	Ixy	Ixz	Iyz	POIconv	Ipoint
+Part	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	+	F
+Mass 1	1.00	1.00	1.00	1.00	NA	NA	NA	NA	NA	NA	+	T
+Mass 2	1.00	-1.00	-1.00	-1.00	NA	NA	NA	NA	NA	NA	+	T

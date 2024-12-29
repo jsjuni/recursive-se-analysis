@@ -1,2 +1,2 @@
-# recursive-se-analysis
-General code for performing recursive analysis common in systems engineering
+# spreadsheets-harmful
+Documents related to memo on use of spreadsheets at JPL.

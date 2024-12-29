@@ -1,0 +1,1484 @@
+---
+title: "Rolling Up Mass as an Example of Recursive Calculation"
+author: "J S Jenkins, Engineering Development Office, Systems Engineering Division"
+date: '2023-10-30'
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_float:
+      collapse: no
+  pdf_document:
+    toc: yes
+---
+
+# Overview
+
+Mass rollup (a Master Equipment List or "MEL") is a simple example of a class of computations in which elements are arranged in a tree structure and some property of each element is a computed function of the corresponding values of its child elements. Leaf elements, i.e., those with no children, have values assigned. In many cases (e.g., mass) the combining function is simply the arithmetic sum; in other cases (e.g., higher-order mass properties), the combiner may involve other information such as the geometric relationship between parent and child, or a statistical technique such as root-sum-of-squares (RSS).
+
+The purpose of this tutorial is to introduce an approach to the general class of such problems and to demonstrate a small but highly-general implementation that handles complex cases but is simple to use for simple cases. The fundamental design principle is to strictly separate those parts of the code that are invariant across all applications (e.g., tree traversal) from those that depend on a specific application (e.g., combining mass properties) Throughout the implementation, we will guard against errors that can corrupt the results but often go undetected in less rigorous implementations, e.g., spreadsheets. Of course, code and data will be strictly isolated from each other, a long-standing principle of software quality that is egregiously violated in virtually every spreadsheet.
+
+```{r echo = FALSE}
+library(igraph, quietly=TRUE, warn.conflict=FALSE)
+
+source("../R/rollup.R")
+source("../R/update_prop.R")
+source("../R/huxtable_from_tree_table.R")
+
+# load sbs table and edges
+
+sbs_table <- read.csv("../mt-names.csv", stringsAsFactors = FALSE)
+sbs_table <- sbs_table[order(sbs_table$key), c("id", "name")]
+sbs_edges <- read.csv("../el-ok.csv", stringsAsFactors = FALSE)
+
+# construct graph from edges; add any vertices named in the table
+# but not part of an edge
+
+sbs <- graph_from_edgelist(as.matrix(sbs_edges[, c("child", "parent")]), directed = TRUE)
+sbs <- sbs + vertices(setdiff(sbs_table$id, names(V(sbs))))
+
+vc <- table(dfs(sbs, root = 2, mode = "in", order = FALSE, dist = TRUE)$dist)
+
+# We need this before we describe it.
+
+validate_tree <- function(tree) {
+  if (girth(tree, circle = FALSE)$girth != Inf) stop("graph is cyclic") # girth() changed in igraph 1.6.0
+  if (any(which_loop(tree))) stop("graph contains loops")
+  if (any(which_multiple(tree))) stop("graph contains multiple edges")
+  if (!is_connected(tree)) stop("graph is disconnected")
+  if (!is_directed(tree)) stop("graph is undirected")
+  roots <- which(degree(tree, mode = "out") == 0)
+  if (length(roots) > 1) stop("graph contains multiple roots")
+  roots[1]
+}
+```
+Our example problem is rolling up mass by assembly breakdown. For this purpose we use a randomly-generated breakdown tree with hierarchy _system_-_segment_-_element_-_subsystem_-_assembly_-_subassembly_-_part_. The example tree contains
+
+* `r vc[1]` system
+* `r vc[2]` segments
+* `r vc[3]` elements
+* `r vc[4]` subsystems
+* `r vc[5]` assemblies
+* `r vc[6]` subassemblies
+* `r vc[7]` parts
+* `r sum(vc)` total vertices
+
+A schematic of the example tree appears below. Details at subassembly and part levels are too fine to be resolved at this size.
+
+```{r echo = FALSE}
+plot(sbs, layout = layout_as_tree(sbs, root  = 2, mode = "in"), vertex.size = 1, vertex.label=NA, edge.arrow.size = 0, asp = .4)
+
+# plot to include in PowerPoint
+# dist <- dfs(sbs, 2, mode="in", order=FALSE, dist=TRUE)$dist
+# subtrees <- lapply(seq(1, 6), FUN=function(i) induced_subgraph(sbs, V(sbs)[which(dist<= i)]))
+# h<-6; w<-12
+# svg(height=h, width=w)
+# par('pin' = c(w,h))
+# plot(subtrees[[4]], layout = layout_as_tree(subtrees[[4]], root  = 2, mode = "in"), vertex.size = 1, vertex.label=NA, edge.arrow.size = 0, asp = .4)
+# dev.off()
+```
+
+# Data Structures
+
+We will organize the discussion around two fundamental data structures: a decomposition tree and a property table. In principle, these could be combined, but separating them enables a single decomposition tree to be used for multiple property rollups. Moreover, the relationships expressed in the tree are meaningful in their own right (e.g., physical decomposition) so the principle of separation of concerns applies.
+
+## The Decomposition Tree
+
+The decomposition tree expresses a set of parent-child relationships. The precise meaning of the relationship is contextual and need not concern us for the moment. There are constraints on the tree, which we now enumerate using the vocabulary of graph theory.
+
+Mathematical graph theory is the study of pairwise relations between objects. There are two benefits to viewing this problem in graph-theoretic terms. First, it gives us a rigorous and well-understood mathematical framework in which to discuss conditions, operations, etc. Second, and more practically, there are numerous high-quality software graph libraries with reliable and fast algorithms for performing operations on graphs. Fundamentally, however, embedding a real-world problem in a mathematical theory in order to find practical solutions is the essence of engineering. It's what engineers have always done. We're comfortable doing it when the theory is calculus, differential equations, probability, etc. We should be just as comfortable with perhaps unfamiliar mathematical concepts when they match our problems so beautifully.
+
+We begin by simply listing in natural language some of the constraints that must be satisfied by something we call a decomposition tree. For the purpose of discussion, we employ the relation _is-child-of_, pointing from child to parent. Also note that in graph theory the related objects are called _vertices_ and the connections between vertices are called _edges_.
+
+* Every vertex has most one parent vertex. If this were not true, the mass of any child would be accumulated into more than one parent. This constraint ensures that each supplied mass is accounted for at most once.
+* Every vertex except one, called the _root_, has a parent vertex. This constraint ensures that every supplied mass is counted at least once and the accumulation ends at the root.
+* No vertex can be its own parent. Violating this constraint is nonsensical in the context of mass accounting.
+* If _C_ is a child of _P_, then _P_ is not a child of _C_. (The precise condition is somewhat stronger: if _C_ is a descendant of _P_, then _P_ is not a descendant of _C_, where _is-descendant-of_ is the _transitive closure_ of _is-child-of_.)
+
+The notion of _tree_ is well-defined in graph theory: a tree is a graph that is _connected_ and _acyclic_. One specialization is known as a _directed rooted tree_. A rooted tree is a tree in which a single vertex has been designated as the _root_, and a _directed tree_ is a rooted tree in which all edges are directed either toward or away from the root. For our example, the _is-child-of_ relation points toward the root, but it would work just as well to define an _is-parent-of_ relation that points away.
+
+It is easy to show that a connected, acyclic, directed, rooted tree satisfies the constraints listed above. We will be careful when constructing our example tree to verify that it has all required properties.
+
+We will construct our tree from two pieces of information: a vertex list and an edge list. Both are required; otherwise we are assuming that the graph is connected, which is one of the properties we need to verify.
+
+### Vertex List
+
+The vertex list is a simple pairing of identifiers and names. Here's a sample of our vertex list:
+
+```{r, echo=FALSE}
+knitr::kable(sbs_table[1:100, ], row.names=FALSE)
+```
+Note that this is simply a flat list of identifiers and names; the hierarchy implied by the identifiers is just that: implicit.
+
+### Edge List
+
+The edge list associates each child ID with a parent ID. Here is a sample:
+
+```{r, echo=FALSE}
+knitr::kable(sbs_edges[1:100, c("child", "parent")], row.names=FALSE)
+```
+
+### Discussion
+
+It is important to note that our tree is simply a set of asserted relationships among elements. These relationships need not be essential, invariant properties of the elements themselves. For the purpose of reporting computed quantities like mass, power, cost, etc., we are free to assert arbitrary compositions for any purpose whatever, as long as the resulting graph exhibits the required characteristics.
+
+This is an important detail to keep in mind for implementation. We do not want our rollup code to be entangled with any particular conventions for conveying hierarchy. In fact, there are multiple hierarchies (e.g., authority delegation, physical containment, etc.) for which we might wish to calculate rollups. For this reason we use the simplest possible representation for the tree and project particular uses into that form. Then we can implement the required functionality with care, test it thoroughly, and then reuse it many times with confidence.
+
+## The Property Table
+
+The property table is simply an association between a vertex ID and some property or properties of interest. For the purposes of illustration we assign a random mass to every leaf component (Part). Here is a sample:
+
+```{r, echo=FALSE}
+# add leaf masses
+
+leaves <- names(V(sbs)[degree(sbs, mode="in") == 0])
+sbs_table[is.element(sbs_table$i, leaves), "mass"] <- runif(length(leaves), min=0.0, max=1.0)
+
+knitr::kable(sbs_table[1:100, ], row.names=FALSE)
+```
+
+# Usage in R
+
+We now show how to calculate a mass rollup using a small library of methods in [R](https://www.r-project.org/) using the [igraph](https://igraph.org/r/) library.
+
+R is what is known as a [functional programming](https://en.wikipedia.org/wiki/Functional_programming) language. One characteristic of functional languages is that functions are first-class objects: variables can take functions as values and functions can take functions as arguments. We exploit this property to build our rollup capability with great generality; we apply it to a specific situation by passing it functions that do what we want in this particular circumstance. The pattern repeats at successively lower levels; the functions we pass to our rollup method may themselves be reusable functions configured for a particular purpose by their arguments, etc. The core code is unchanged and therefore more trustworthy.
+
+## Constructing the Tree
+
+Assume for the purposes of the example that we have simple R data frames corresponding to the vertex list and edge list as shown above. These could be created by reading tabular files with columns as shown.
+
+The following lines make a graph using standard `igraph` methods. The first constructs a graph from the edge list and the second adds any vertices not already added.
+
+```{r}
+sbs <- graph_from_edgelist(as.matrix(sbs_edges[, c("child", "parent")]), directed = TRUE)
+sbs <- sbs + vertices(setdiff(sbs_table$id, names(V(sbs))))
+```
+
+Here are some of the edges in the graph:
+
+```{r, echo=FALSE}
+sbs
+```
+
+## Constructing the Property Table
+
+The property table can be created by simply adding a column for mass to the vertex list. For this example, we consider the simplest case in which only leaf vertices contribute mass. A slightly more complex variant is considered later. For this simple case, there are `r length(leaves)` leaf vertices.
+
+The rollup algorithm makes no assumptions about the implementation of the property table except that there exist _get_ and _set_ methods for any quantity of interest (e.g., mass) and that we can employ these methods for any vertex by ID. In R, the most natural way to implement the property table is with a _data frame_. The rollup code provides helper methods to construct _get_ and _set_ methods for data frames.
+
+The property table listed above is in fact an R data frame, so we use it as is.
+
+## Computing the Result
+
+To roll up mass, we need to call a `rollup()` function with four arguments:
+
+* the tree specifying rollup relations
+* the property table
+* a property update function to be performed at each vertex
+* a validation function for the property table
+
+We show here how the mass update function is defined. Because we are using the defaults (e.g., data frame with ID column named 'id', combine using addition, the configuration is simple boilerplate. (The only unique content is the word "mass".)
+
+```{r}
+update_mass <- function(df, parent_id, child_ids) {
+  update_df_prop_by_id(df, parent_id, child_ids, "mass")
+}
+```
+
+`update_df_prop_by_id()` is a builtin function that uses other builtin _get_ and _set_ methods for data frames.
+
+Similarly the property table validator is more boilerplate:
+
+```{r}
+validate_mass <- function(tree, df) {
+  validate_df_with_id(tree, df, "mass")
+}
+```
+
+This builtin method ensures that all leaf vertices have a defined initial mass.
+
+Here's the call that does the work:
+```{r}
+sbs_table <- rollup(sbs, sbs_table, update_mass, validate_mass)
+```
+
+R allows anonymous functions, so we could also call `rollup()` like this, without defining named functions `update_mass()` and `validate_mass()`:
+
+```{r}
+sbs_table <- rollup(sbs,
+                    sbs_table,
+                    function(df, parent_id, child_ids)
+                      update_df_prop_by_id(df, parent_id, child_ids, "mass"),
+                    function(tree, df) validate_df_with_id(tree, df, "mass")
+                    )
+```
+
+If all validations pass, `rollup()` returns an updated property table with the non-leaf masses computed. A sample:
+
+```{r, echo=FALSE}
+knitr::kable(sbs_table[1:100, ], row.names=FALSE)
+```
+
+As a check, we note that the sum of the leaf masses is `r sum(sbs_table[is.element(sbs_table$i, leaves), "mass"])` and the total mass computed is `r sbs_table[1, "mass"]`.
+
+## Presenting the Result
+
+A common presentation format for a rollup is to present the tree element IDs and names in an indented list, along with the rolled up quantities. Constructing the indented list is a straightforward computation using standard table-building concepts such as _row spanning_. We have provided a convenience method to build an indented list using the [`huxtable`](https://cran.r-project.org/web/packages/huxtable/vignettes/huxtable.html) library. The result can be transformed into LaTeX, HTML, Microsoft Word, Microsoft Excel, Microsoft Powerpoint, RTF and Markdown.
+
+```{r}
+il <- huxtable_from_tree_table(sbs, sbs_table)
+```
+
+Append the column of rolled-up masses and reduce vertical padding:
+```{r}
+mt <- cbind(il, hux(sbs_table$mass))
+mt <- set_number_format(mt, everywhere, ncol(mt), "%8.2f")
+mt <- set_top_padding(set_bottom_padding(mt, 0), 0)
+```
+
+Here is a sample of the result:
+
+```{r, echo=FALSE}
+mt[1:100, ]
+```
+
+## An Alternative Decomposition
+
+Suppose we would like to aggregate two subsystems, e.g., Assembly 12 (C.1.1.2.2.1) of Subsystem 4 and Assembly 25 (C.1.1.3.2.2) of Subsystem 7, into an artificial aggregation and accumulate its mass under Subsystem 2 (C.1.1.1.2). We'll call it "Aggregation 1" and give it identifier "A.1".
+
+That is, we would like this slice of the tree:
+```{r echo=FALSE}
+slice_up_from <- function(g, vl) {
+  a <- unlist(neighborhood(graph=g, order=1000, nodes=V(g)[vl], mode="out"))
+  induced_subgraph(graph=g, vids=a)
+}
+s <- slice_up_from(sbs, c("C.1.1.2.2.1", "C.1.1.3.2.2"))
+t <- sbs_table[is.element(sbs_table$id, names(V(s))), c("id", "name")]
+sh <- set_top_padding(set_bottom_padding(huxtable_from_tree_table(s, t), 0), 0)
+sh
+```
+to look like this instead:
+```{r echo=FALSE}
+alt_sbs_table <- rbind(sbs_table, data.frame(id='A.1', name='Aggregation 1', mass=NA))
+alt_sbs <- add_vertices(sbs, 1, name='A.1')
+alt_sbs <- delete_edges(alt_sbs, E(alt_sbs)[.from('C.1.1.2.2.1')])
+alt_sbs <- delete_edges(alt_sbs, E(alt_sbs)[.from('C.1.1.3.2.2')])
+alt_sbs <- add_edges(alt_sbs, c('A.1', 'C.1.1.1.2'))
+alt_sbs <- add_edges(alt_sbs, c('C.1.1.2.2.1', 'A.1'))
+alt_sbs <- add_edges(alt_sbs, c('C.1.1.3.2.2', 'A.1'))
+alt_s <- slice_up_from(alt_sbs, c("C.1.1.2.2.1", "C.1.1.3.2.2"))
+alt_t <- alt_sbs_table[is.element(alt_sbs_table$id, names(V(alt_s))), c("id", "name")]
+alt_t <- alt_t[match(names(dfs(alt_s, V(alt_s)["C.1"], mode="in")$order), alt_t$id), ] # works for this case, not in general
+alt_sh <- set_top_padding(set_bottom_padding(huxtable_from_tree_table(alt_s, alt_t), 0), 0)
+alt_sh
+```
+
+Because this alternative decomposition contains a new vertex, we create a new property table by copying the original and adding a row:
+
+```{r}
+alt_sbs_table <- rbind(sbs_table, data.frame(id='A.1', name='Aggregation 1', mass=NA))
+```
+
+We copy the tree, add the new vertex, remove two edges, and add three new edges:
+
+```{r}
+alt_sbs <- add_vertices(sbs, 1, name='A.1')
+alt_sbs <- delete_edges(alt_sbs, E(alt_sbs)[.from('C.1.1.2.2.1')])
+alt_sbs <- delete_edges(alt_sbs, E(alt_sbs)[.from('C.1.1.3.2.2')])
+alt_sbs <- add_edges(alt_sbs, c('A.1', 'C.1.1.1.2'))
+alt_sbs <- add_edges(alt_sbs, c('C.1.1.2.2.1', 'A.1'))
+alt_sbs <- add_edges(alt_sbs, c('C.1.1.3.2.2', 'A.1'))
+```
+
+And now we call `rollup()` on our alternative table and tree.
+
+```{r}
+alt_sbs_table <- rollup(alt_sbs, alt_sbs_table, update_mass, validate_mass)
+```
+
+Let's check a few things. First, is the total system mass the same?
+
+```{r}
+all.equal(
+  sbs_table$mass[sbs_table$name == 'System 1'],
+  alt_sbs_table$mass[alt_sbs_table$name == 'System 1']
+)
+```
+
+Is the mass of Aggregation 1 the sum of the masses of Assemblies 12 and 25?
+
+```{r}
+all.equal(
+  alt_sbs_table$mass[alt_sbs_table$name == 'Aggregation 1'],
+  alt_sbs_table$mass[alt_sbs_table$name == 'Assembly 12'] +
+    alt_sbs_table$mass[alt_sbs_table$name == 'Assembly 25']
+)
+```
+
+## Summary
+
+The steps to perform a rollup are:
+
+1. Create a rollup graph from a vertex list and edge list. Note that a given tree can be used to roll up multiple properties.
+2. Create a property table with a row for each vertex in the tree and a column for each property to be rolled up.
+3. For each property, construct a property updater and table validator. These are simple boilerplate configurations.
+4. For each property, call `rollup()` with the appropriate updater and validator.
+5. If desired, create a presentation table with `huxtable_from_tree_table()`.
+
+# Implementation in R
+
+This section describes the library implementation in detail. It is not necessary to understand the implementation in order to use it. It is important to note, however that the library described below, despite its brevity, is completely general, and can be used to mechanize any computation whatever in which some properties of a parent depend on the same properties of its children, regardless of how those properties are stored and accessed or the algorithm by which they are combined.
+
+## Tree Traversal
+
+The outer loop of the algorithm does the following:
+
+* for each vertex in the tree
+    * apply a designated property update function involving that vertex and its children
+        
+The outer vertex iteration must be ordered in such a way that no parent is updated before its children.
+
+In the case of a simple mass rollup, we need to define a property update method that gets a designated property from each child vertex, combines them using a designated function (usually sum), and updates the designated property in the parent vertex. This property updater will be passed as an argument to the outer loop.
+
+The outermost function we call `rollup()`. Here is its complete source code:
+
+```{r}
+# rollup(tree, update, ds, validate_ds)
+#
+#     tree:         igraph dag
+#     ds:           dataset to update
+#     update:       called depth-first at each node as update(ds, parent_key, child_keys)
+#     validate_ds:  called as validate_ds(tree, ds)
+
+rollup <- function(tree, ds, update, validate_ds) {
+  root <- validate_tree(tree)
+  validate_ds(tree, ds)
+  Reduce(
+    f = function(s, v) update(s, names(V(tree))[v], names(neighbors(tree, v, "in"))),
+    x = dfs(tree, root, mode="in", order=FALSE, order.out=TRUE)$order.out,
+    init = ds
+  )
+}
+```
+
+Note that in the call to `rollup()`, two arguments (`update` and `validate_ds`) are functions. The first is how we tell rollup what to do at each vertex.
+
+The first two lines of `rollup()` validate the well-formedness of a tree and a dataset (in our case, the vertex tree and property table) and find the root of the tree. We elaborate on this later.
+
+An iteration over the vertices of a tree in which each vertex is visited after its children is called in graph theory a _post-order_ traversal. R's igraph library includes a method called `dfs` (depth-first search) that will compute a post-order traversal.
+The `Reduce()` call uses a well-known idiom in functional programming (sometimes called _fold_) to traverse the graph in post-order and apply, for each vertex, a user-specified function, passing it a dataset upon which to operate and the IDs of the vertex and its children. The user-specified function returns the updated dataset. `Reduce()` accumulates these updates and returns the final dataset, as does `rollup()`.
+
+Note that this core capability is implemented in only a handful of lines of code because we effectively exploit the capabilities of `igraph` and the support for functions as function arguments in R. The key is to construct an update function with the signature of `update()`.
+
+## Tree and Table Validation
+
+Before attempting any computation, `rollup()` ensures, among other things, that the graph purporting to be a tree satisfies all constraints. If this validation fails, the computed result is not trustworthy and the computation is not attempted. For the purposes of illustration, we simply raise an exception and stop. Further diagnosis is possible, e.g., listing the vertices in a cycle.
+
+Here is `validate_tree()`:
+
+```{r}
+#
+# validate_tree(tree)
+#
+
+validate_tree <- function(tree) {
+  if (girth(tree, circle = FALSE)$girth != Inf) stop("graph is cyclic") # girth() changed in igraph 1.6.0
+  if (any(which_loop(tree))) stop("graph contains loops")
+  if (any(which_multiple(tree))) stop("graph contains multiple edges")
+  if (!is_connected(tree)) stop("graph is disconnected")
+  if (!is_directed(tree)) stop("graph is undirected")
+  roots <- which(degree(tree, mode = "out") == 0)
+  if (length(roots) > 1) stop("graph contains multiple roots")
+  roots[1]
+}
+```
+
+Here is `validate_table()`:
+
+```{r}
+#
+# validate_table(tree, table, get_keys, get_prop, op=function(x) is.numeric(x))
+#
+
+validate_table <- function(tree, table, get_keys, get_prop, op=function(x) is.numeric(x)) {
+  tree_ids <- names(V(tree))
+  table_ids <- get_keys(table)
+  if (!setequal(tree_ids, table_ids)) stop("mismatched ids")
+  leaves <- names(which(degree(tree, mode = "in") == 0))
+  if (any(sapply(leaves, FUN=function(l) !op(get_prop(table, l)))))
+    stop (paste("leaf with invalid", prop, " value"))
+}
+```
+
+`validate_table()` takes a tree, a table, and methods to get the keys for the table, to get a value by key, and to validate such a value. It ensures that the keys in the table match those in the tree, then gets the requested value for each leaf and validates it. The default validator checks to ensure the value is a valid number.
+
+## Property Update
+
+The most general implementation of the property update method makes no assumptions about the form of the property table. It expects to be called with _get_ and _set_ methods and a property designation sufficient to get and set values for that property for any specified row of the property table. Here is the complete implementation of `update_prop()`:
+
+```{r}
+# update_prop(ds, target, sources, set, get, combine = function(l) Reduce('+', l), override = function(ds, target, v) v)
+#
+#     ds:       dataset with properties to be updated
+#     target:   key of target object in dataset
+#     sources:  keys of source objects in dataset
+#     set:      set method for property, called as set(ds, id, value)
+#     get:      get method for property, called as get_a(ds, id)
+#     combine:  combining operator (default: sum)
+#     override: override value function, called as override(ds, target, value)
+
+update_prop <- function(ds, target, sources, set, get,
+                        combine = function(l) Reduce('+', l),
+                        override = function(ds, target, v) v) {
+  if (length(sources) > 0) {
+    av <- Map(f = function(s) get(ds, s), sources)
+    set(ds, target, override(ds, target, combine(av)))
+  } else
+    ds
+}
+```
+
+The property updater itself knows nothing about parent-child relationships. All it needs to know is a target and a (possibly empty) set of sources on which to operate. When called by `rollup()`, the target is the parent and the sources are the children, but that is a feature of `rollup()`, not `update_prop()`.
+
+The `override()` function provides a mechanism to override any computed value with a user-specified value. For the moment we simply keep the default, which is to use the computed value.
+
+There are various specializations of `update_prop()` for common uses, the simplest of which is a data frame with the element ID in a column with name `id`. For this case `update_df_prop_by_id()` makes use of internally-defined _get_ and _set_ methods. This is the method we used in our example. Its implementation is
+
+```{r}
+# update_df_prop_by_id(df, target, sources, prop, ...)
+#
+#     df:       data frame with properties to be updated
+#     target:   id of target object in dataset
+#     sources:  ids of source objects in dataset
+#     prop:     property in dataset to be combined and updated
+
+update_df_prop_by_id <- function(df, target, sources, prop, ...) {
+  update_prop(df, target, sources,
+              function(df, id, v) df_set_by_id(df, id, prop, v),
+              function(df, id, v) df_get_by_id(df, id, prop),
+              ...
+  )
+}
+```
+
+## _Get_ and _Set_ Methods
+
+Convenience methods are provided for property tables implemented as data frames:
+
+```{r}
+# get keys from data frame
+
+df_get_keys <- function(df, key) df[, key]
+
+# get ids from data frame (key="id")
+
+df_get_ids <- function(df) df_get_keys(df, "id")
+
+# get property by key from data frame
+
+df_get_by_key <- function(df, key, r, c) df[df[, key] == r, c]
+
+# get property by key="id" from data frame
+
+df_get_by_id <- function(df, r, c) df_get_by_key(df, "id", r, c)
+
+# set property by key in data frame
+
+df_set_by_key <- function(df, key, r, c, v) {
+  df[df[, key] == r, c] <- v
+  df
+}
+
+# set property by key="id" in data frame
+
+df_set_by_id <- function(df, r, c, v) {
+  df_set_by_key(df, "id", r, c, v)
+}
+```
+
+## Reporting
+
+Here is the implementation of `huxtable_from_tree_table()`:
+
+```{r}
+huxtable_from_tree_table <- function(tree, tree_table, use.names=TRUE, spacer=NULL) {
+  
+  # validate tree
+  
+  root <- validate_tree(tree)
+  
+  # display column is tree depth + 1
+  
+  tree_table$column <- dfs(tree, root, mode="in", order=FALSE, dist=TRUE)$dist[tree_table$id] + 1
+  
+  # create matrix for huxtable data
+  
+  width <- max(tree_table$column)
+  m <- matrix(nrow=nrow(tree_table), ncol=width)
+  for (c in 1:width) {
+    rows = which(tree_table$column == c)
+    
+    if (!is.null(spacer))
+      m[rows, 1:(c-1)] = spacer
+    
+    m[rows, c] <- if (use.names)
+      paste(tree_table[rows, "id"], tree_table[rows, "name"], sep=" ")
+    else
+      tree_table[rows, "id"]
+    
+  }
+  
+  # create huxtable
+  
+  ht <- hux(m)
+  
+  # set column spans
+  
+  for (c in 1:(width - 1)) {
+    rows <- which(tree_table$column == c)
+    ht <- set_colspan(ht, rows, c, width - c + 1)
+  }
+  
+  ht
+}
+```
+## Overrides
+
+The power and flexibility of functional programming allows us an easy method to define an _override_ method whose purpose is to replace an asserted or computed set of values at a vertex with some other value, perhaps computed from the former. For example, a simple affine transform (multiplier $m$ and offset $b$) would allow us to override a computed value $x$ with a scaled value ($m > 0$, $b = 0$), a constant offset ($m = 1$), a fixed value ($m = 0$), or some combination thereof. Named sets of such transformations could be applied as a group, allowing distinct options in a trade, for example, to be separately analyzed.
+
+We will see an application of overrides in the mass properties example. The default override function simply returns its input value unmodified.
+
+# Advanced Example: Mass Properties
+
+For this example we reuse the system breakdown tree but our property table now includes the following parameters: mass ("mass"), center of mass ("Cx", "Cy", "Cz"), and upper triangle of inertia tensor ("Ixx", "Iyy", "Izz", "Ixy", "Ixz", "Iyz"). We can use `rollup()` and `update_prop()` as is, but we will need to create specialized _get_ and _set_ methods that operate on mass property sets and a specialized combiner update for such sets.
+
+Although the theory of mass properties is straightforward, there are minor complications that arise in practice. One is that there are  [two conventions](https://wiki.jpl.nasa.gov/display/wired/Mass+properties#Massproperties-Inertia) for defining products of inertia. In the _negative_ convention, the off-diagonal elements of the inertia tensor are the products of inertia. In the _positive_ convention, they are the negated products of inertia. We could simply require that the user adhere to one convention or the other, but in real-world practice observations of mass properties may come from different sources (e.g., CAD tools, measurement devices) with the conventions of those sources. Rather than burden the user with converting, we simply add a `POIconv` indicator (with values `+` or `-`) to each mass property set, indicating its convention. The software will convert as necessary.
+
+Another complication is that there may be small parts (e.g., fasteners) for which we believe the inertia is negligible. We could, of course, assert its moments and products of inertia to be zero, but this leads to a dilemma. It is sound practice for computational software to validate its inputs; in this application the validation should ensure that every inertia tensor satisfies the mathematical constraints that ensure it corresponds to a physically-realizable object. An identically-zero inertia tensor violates those constraints, so we either relax the checking or indicate explicitly that the inertia of this object is excluded from the computation. This is, of course, arithmetically equivalent to adding an identically-zero inertia tensor, but is a superior approach because it explicitly indicates our intent and detects other invalid inertia tensors that arise from errors and omissions, not intent. We simply add an `Ipoint` boolean property to indicate that this mass property set represents a point mass.
+
+Here's a sample of our initial mass property table:
+
+```{r, echo=FALSE}
+source("../R/mass-props.R")
+saved_mass <- sbs_table[is.element(sbs_table$id, leaves), "mass"]
+sbs_table <- read.csv("../mt-names.csv", stringsAsFactors = FALSE)
+sbs_table <- sbs_table[order(sbs_table$key), c("id", "name")]
+nr <- nrow(sbs_table)
+sbs_table <- cbind(
+  sbs_table,
+  mass = NA,
+  Cx = NA,
+  Cy = NA,
+  Cz = NA,
+  Ixx = NA,
+  Iyy = NA,
+  Izz = NA,
+  Ixy = NA,
+  Ixz = NA,
+  Iyz = NA,
+  POIconv = '-',
+  Ipoint = FALSE
+)
+
+# rotation matrix as a function of angles
+
+Rxyz <- function(a, b, c) {
+  sina <- sin(a)
+  cosa <- cos(a)
+  sinb <- sin(b)
+  cosb <- cos(b)
+  sinc <- sin(c)
+  cosc <- cos(c)
+  matrix(c(
+    cosa * cosb, cosa * sinb * sinc - sina * cosc, cosa * sinb * cosc + sina * sinc,
+    sina * cosb, sina * sinb * sinc + cosa * cosc, sina * sinb * cosc - cosa * sinc,
+    -sinb, cosb * sinc, cosb * cosc
+  ), nrow=3, byrow=TRUE)
+}
+
+# https://physics.stackexchange.com/questions/348944/what-is-the-problem-of-having-an-inertia-tensor-not-satisfying-the-triangle-ineq
+
+random_mass_props <- function() {
+  mp <- list()
+  
+  mp$mass <- runif(1, min=0.001, max=1.0)
+  
+  mp$center_mass <- runif(3, min=-100.0, max=100.0)
+  
+  # principal moments of a cuboid of specified mass and random dimensions
+  
+  xyz <- list("x", "y", "z")
+  pm <- mp$mass / 12. * as.vector(matrix(c(0, 1, 1,
+                                           1, 0, 1,
+                                           1, 1, 0), nrow=3) %*% runif(3, min=5.0, max=10.0))
+  
+  # rotate through random x, y, z angles
+  
+  angle <- runif(3, min=-pi, max=pi)
+  R <- Rxyz(angle[1], angle[2], angle[3])
+  mp$inertia <- R %*% diag(pm) %*% t(R)
+  dimnames(mp$inertia) <- list(xyz, xyz)
+  
+  mp$point <- FALSE
+  
+  mp
+}
+
+# we define this now but explain it later
+
+df_set_mass_props <- function(df, id, v, poi_conv = "-") {
+  m <- v$inertia
+  poi_factor <- if (poi_conv == "-") 1 else -1
+  df %>% df_set_by_id(id, "mass", v$mass) %>%
+  
+    df_set_by_id(id, "Cx", v$center_mass[1]) %>%
+    df_set_by_id(id, "Cy", v$center_mass[2]) %>%
+    df_set_by_id(id, "Cz", v$center_mass[3]) %>%
+    
+    df_set_by_id(id, "Ixx", m["x", "x"]) %>%
+    df_set_by_id(id, "Iyy", m["y", "y"]) %>%
+    df_set_by_id(id, "Izz", m["z", "z"]) %>%
+    df_set_by_id(id, "Ixy", poi_factor * (m["x", "y"] + m["y", "x"]) / 2.0) %>%
+    df_set_by_id(id, "Ixz", poi_factor * (m["x", "z"] + m["z", "x"]) / 2.0) %>%
+    df_set_by_id(id, "Iyz", poi_factor * (m["y", "z"] + m["z", "y"]) / 2.0) %>%
+
+    df_set_by_id(id, "POIconv", poi_conv) %>%
+    df_set_by_id(id, "Ipoint", v$point)
+  }
+
+for (id in leaves) {
+  sbs_table <- df_set_mass_props(sbs_table, id, random_mass_props())
+}
+sbs_table[is.element(sbs_table$id, leaves), "mass"] <- saved_mass
+
+knitr::kable(sbs_table[1:100, ], row.names=FALSE, digits=3)
+```
+
+## Property Update
+
+Our property updater is simple:
+
+```{r}
+update_mass_props <- function(ds, parent_key, child_keys, ...) {
+  update_prop(ds, parent_key, child_keys, df_set_mass_props, df_get_mass_props,
+              combine = combine_mass_props, ...)
+}
+```
+
+Of course, we still have to write `df_set_mass_props()`, `df_get_mass_props()`, and `combine_mass_props()`.
+
+## _Get_ and _Set_ Methods
+
+We could, as many spreadsheet applications do, write a combiner for each individual property, but the implementation is cleaner if we operate on mass as a scalar, center of mass as a vector, and inertia tensor as a matrix. So our `df_get_mass_props()` builds those objects from values in the property table and adds them to a named list:
+
+```{r}
+df_get_mass_props <- function(df, id) {
+  poi_conv <- df_get_by_id(df, id, "POIconv")
+  list(
+    mass = df_get_by_id(df, id, "mass"),
+    center_mass = sapply(c(x = "Cx", y = "Cy", z = "Cz"), FUN=function(p) df_get_by_id(df, id, p)),
+    inertia = {
+      xyz <- list("x", "y", "z")
+      it <- matrix(data = rep.int(0, 9), nrow = 3, dimnames = list(xyz, xyz))
+      it["x", "x"] <- df_get_by_id(df, id, "Ixx")
+      it["y", "y"] <- df_get_by_id(df, id, "Iyy")
+      it["z", "z"] <- df_get_by_id(df, id, "Izz")
+      poi_factor <- if (poi_conv == '-') 1 else -1
+      it["x", "y"] <- it["y", "x"] <- poi_factor * df_get_by_id(df, id, "Ixy")
+      it["x", "z"] <- it["z", "x"] <- poi_factor * df_get_by_id(df, id, "Ixz")
+      it["y", "z"] <- it["z", "y"] <- poi_factor * df_get_by_id(df, id, "Iyz")
+      it
+    },
+    point = df_get_by_id(df, id, "Ipoint")
+  )
+}
+```
+
+For example, `df_get_mass_props(sbs_table, 'C.1.1.1.1.1.1.1')` returns
+
+```{r, echo=FALSE}
+df_get_mass_props(sbs_table, 'C.1.1.1.1.1.1.1')
+```
+
+`df_set_mass_props()` performs the inverse:
+
+```{r}
+df_set_mass_props <- function(df, id, v, poi_conv = "-") {
+  m <- v$inertia
+  poi_factor <- if (poi_conv == "-") 1 else -1
+  df %>% df_set_by_id(id, "mass", v$mass) %>%
+  
+    df_set_by_id(id, "Cx", v$center_mass[1]) %>%
+    df_set_by_id(id, "Cy", v$center_mass[2]) %>%
+    df_set_by_id(id, "Cz", v$center_mass[3]) %>%
+    
+    df_set_by_id(id, "Ixx", m["x", "x"]) %>%
+    df_set_by_id(id, "Iyy", m["y", "y"]) %>%
+    df_set_by_id(id, "Izz", m["z", "z"]) %>%
+    df_set_by_id(id, "Ixy", poi_factor * (m["x", "y"] + m["y", "x"]) / 2.0) %>%
+    df_set_by_id(id, "Ixz", poi_factor * (m["x", "z"] + m["z", "x"]) / 2.0) %>%
+    df_set_by_id(id, "Iyz", poi_factor * (m["y", "z"] + m["z", "y"]) / 2.0) %>%
+
+    df_set_by_id(id, "POIconv", poi_conv) %>%
+    df_set_by_id(id, "Ipoint", v$point)
+}
+```
+
+## Combiner
+
+The combiner is clean and elegant in this formulation:
+
+```{r}
+combine_mass_props <- function(vl) {
+  
+  r <- list()
+  
+  # sum of masses
+  
+  r$mass <- Reduce(`+`, Map(f = function(v) v$mass, vl))
+  
+  # mass-weighted sum of centers of mass
+  
+  r$center_mass <- Reduce(`+`, Map(f = function(v) v$mass * v$center_mass, vl)) / r$mass 
+  
+  # parallel axis theorem
+  # https://en.wikipedia.org/wiki/Parallel_axis_theorem#Moment_of_inertia_matrix
+  # d_ss2 is [d]^2 computed using the identities given
+  # for point masses omit contribution of inertia
+  
+  r$inertia <- Reduce(
+    `+`,
+    Map(
+      f  = function(v) {
+        d <- r$center_mass - v$center_mass
+        ddt <- outer(d, d)
+        d_ss2 <- ddt - sum(diag(ddt)) * diag(3)
+        if (v$point) -v$mass * d_ss2 else v$inertia - v$mass * d_ss2
+      },
+      vl
+    )
+  )
+  
+  # aggregate is a point mass iff all parts are point masses at the same center
+  
+  r$point <- all(vl$point) && isTRUE(all.equal(r$center_mass, vl$center_mass))
+
+  r
+}
+```
+To explain the inertia tensor expression, we show the correspondence between R code and the theoretical [exposition](https://en.wikipedia.org/wiki/Parallel_axis_theorem#Moment_of_inertia_matrix) of the parallel axis theorem in matrix form:
+
+| R code | theory |
+|------|--------|
+| `d <- r$center_mass - v$center_mass` |  $\mathbf{d} = \mathbf{R} - \mathbf{S}$ |
+| `ddt <- outer(d, d)` |  $[{\mathbf{d}}{\mathbf{d}}^T]$ |
+| `d_ss2 <- ddt - sum(diag(ddt)) * diag(3)` | $[d]^2 = [{\mathbf{d}}{\mathbf{d}}^T] - |\mathbf{d}|^2 [E_3]$<br>$|\mathbf{d}|^2 = \mathrm{tr}{[{\mathbf{d}}{\mathbf{d}}^T]}$ |
+| `v$inertia - v$mass * d_ss2` | $[I_R] - M [d]^2$
+
+## Tree and Table Validation
+
+Tree validation is unchanged. For the property table, we define a validator for a single mass property set:
+
+```{r}
+validate_mass_props <- function(mp) {
+  
+  # ensure mass is numeric and positive.
+  
+  if (!is.numeric(mp$mass)) stop("mass non-numeric")
+  if (mp$mass <= 0.) stop("mass non-positive")
+  
+  # ensure center of mass is numeric.
+  
+  if (any(!is.numeric(mp$center_mass))) stop("center of mass element non-numeric")
+  
+  # ensure inertia tensor elements are numeric.
+  
+  if (any(!is.numeric(mp$inertia))) stop("inertia tensor element non-numeric")
+  
+  # ensure inertia tensor is positive definite.
+  
+  ev <- eigen(mp$inertia, symmetric=TRUE, only.values=TRUE)$values
+  if (any(ev <= 0.)) stop("inertia tensor not positive definite")
+  
+  # ensure principal moments obey triangle inequalities
+  
+  if (any(c(
+    ev[1] >= ev[2] + ev[3],
+    ev[2] >= ev[1] + ev[3],
+    ev[3] >= ev[1] + ev[2]
+  ))) stop("inertia tensor violates triangle inequalities")
+  
+  TRUE
+}
+```
+
+Our table validator `validate_mass_props_table()` calls `validate_mass_props()`
+```{r}
+validate_mass_props_table <- function(tree, df) {
+  validate_table(tree, df, df_get_ids, df_get_mass_props, validate_mass_props)
+}
+```
+
+## Results
+
+Invoking `rollup()` is simple as before:
+
+```{r}
+sbs_table <- rollup(sbs, sbs_table, update_mass_props, validate_mass_props_table)
+```
+
+A sample of the result:
+
+```{r, echo=FALSE}
+knitr::kable(sbs_table[1:100, ], row.names=FALSE, digits=3)
+```
+
+Finally, we apply our mass properties validation to the computed root properties:
+
+```{r}
+validate_mass_props(df_get_mass_props(sbs_table, "C.1"))
+```
+
+It is worth noting that to produce this example using conventional spreadsheet techniques requires 10 summing formulas for each non-leaf element and 9 intermediate result formulas for each leaf element: a total of `r sprintf("%d", 10 * nrow(sbs_table) - length(leaves))` unique formulas, every one of which must be correct. It is for all practical purposes impossible to validate such a computation. In the functional technique employed here, the formulas are expressed exactly once, concisely. Consequently all results are correct or all are incorrect. We can verify correctness of the code with test data and then rely on it.
+
+## Results Validation
+
+### Comparison with Analytical Result
+
+Consider the problem of an object with mass 5.0 at the origin surrounded by eight objects with mass 2.0 centered at Cartesian coordinates $(±1, ±1, ±1)$. Let the inertia tensor of the central object
+$$
+\newcommand{\Ic}{\begin{bmatrix} 80 & -4 & -24 \\ -4 & 80 & -24 \\ -24 & -24 & 75 \end{bmatrix}}
+I_c = \Ic
+$$
+
+and of the peripheral objects
+
+$$
+\newcommand{\Ip}{\begin{bmatrix} 4 & -0.1 & -0.1 \\ -0.1 & 4 & 0.1 \\ -0.1 & 0.1 & 4 \end{bmatrix}}
+I_p = \Ip .
+$$
+
+The mass of the aggregate is $5.0 + 8 \cdot 2.0 = 21.0$ and its center of mass is, by symmetry, the origin. Its inertia tensor can be calculated as follows:
+
+The squared skew-symmetric matrix for the object at $\mathbf{d}_1 = \begin{pmatrix} x_1 & y_1 & z_1 \end{pmatrix}^T = \begin{pmatrix} 1 & 1 & 1 \end{pmatrix}^T$, for example, can be seen by inspection to be
+
+$$
+[\mathbf{d}_1]^2
+= \begin{bmatrix} -y_1^2 - z_1^2 & x_1y_1 & x_1z_1 \\ y_1x_1 & -x_1^2 - z_1^2 & y_1z_1 \\ z_1x_1 & z_1y_1 & -x_1^2 - y_1^2 \end{bmatrix} 
+= \begin{bmatrix} -2 & 1 & 1 \\ 1 & -2 & 1 \\ 1 & 1 & -2 \end{bmatrix} .
+$$
+It is a straightforward exercise to show that the sum of the eight squared skew-symmetric matrices for the peripheral objects satisfies
+
+$$
+\newcommand{\sumsssm}{\sum_{i = 1}^8 [\mathbf{d}_i]^2 }
+\newcommand{\sumsssmv}{\begin{bmatrix} -16 & 0 & 0 \\ 0 & -16 & 0 \\ 0 & 0 & -16 \end{bmatrix}}
+\sumsssm = \sumsssmv .
+$$
+The squared skew-symmetric matrix for the central object is identically zero. Consequently, we can easily calculate the aggregate inertia tensor:
+
+$$
+\begin{align}
+I_a
+&= I_c + 8 I_p - 2.0 \sumsssm \\
+&= \Ic + 8 \Ip - 2.0 \sumsssmv \\
+&= \begin{bmatrix} 144 & -4.8 & -24.8 \\ -4.8 & 144 & -23.2 \\ -24.8 & -23.2 & 139 \end{bmatrix} .
+\end{align}
+$$
+
+We assemble a test table and tree. We insert two intermediate aggregates (A.2 and A.3) to check that recursion works properly:
+```{r}
+test_table <- read.csv("../mp-test-table.csv")
+test_tree <- test_tree <- graph_from_edgelist(
+  as.matrix(test_table[test_table$parent != '', c("id", "parent")]),
+  directed = TRUE)
+knitr::kable(test_table)
+```
+
+```{r echo = FALSE}
+plot(test_tree,layout=layout_as_tree(test_tree, 2, mode="in"), vertex.shape = 'none', edge.arrow.mode = 0)
+```
+
+The result:
+
+```{r}
+test_result <-rollup(test_tree, test_table, update_mass_props, validate_mass_props_table)
+knitr::kable(test_result)
+```
+The top-level mass properties:
+```{r}
+df_get_mass_props(test_result, 'A.1')
+```
+
+### Order Independence
+
+It should be the case that the mass properties of the root element depend only on the mass properties of the leaves, and not on any proper arrangement into intermediate aggregates. Let's check if that's true. First we make a new property table with only the root and all leaves:
+
+```{r}
+flat_sbs_table <- sbs_table[is.element(sbs_table$id, c("C.1", leaves)), ]
+```
+
+Now create the flattened tree with an edge from every leaf directly to the root:
+
+```{r}
+flat_sbs_edgelist <- matrix(cbind(leaves, rep("C.1", length(leaves))), byrow=FALSE, ncol=2)
+flat_sbs <- graph_from_edgelist(flat_sbs_edgelist, directed=TRUE)
+```
+
+Rollup is exactly as before:
+
+```{r}
+flat_sbs_table <- rollup(flat_sbs, flat_sbs_table, update_mass_props, validate_mass_props_table)
+```
+
+Check if the root properties are within double-precision tolerance (`r .Machine$double.eps ^ 0.5`) of those before:
+
+```{r}
+all.equal(df_get_mass_props(sbs_table, "C.1"), df_get_mass_props(flat_sbs_table, "C.1"))
+```
+## Threats and Opportunities
+
+We can use the override feature described in the Implementation section to implement a simple but powerful mechanism for threats and opportunities.
+
+First, we define a simple override method:
+
+```{r}
+# override_mass_props
+#
+# ol:       overrides list with elements id, m, and b, and scale_it
+# ds:       dataset for input parameters (not used in this example)
+# id:       element id in dataset (not used in this example)
+# mp:       mass properties to be overridden
+
+override_mass_props <- function(ol, ds, id, mp) {
+  
+  # get initial values
+  
+  mass <- mp$mass
+  it <- mp$inertia
+  
+  # apply overrides
+  
+  for (row in which(ol$id == id)) {
+    ov <- ol[row, ]
+    new_mass <- mass * ov$m + ov$b
+    if (ov$scale_it & mass > 0.0) it <- (new_mass / mass) * it
+    mass <- new_mass
+  }
+  
+  list(mass=mass, center_mass=mp$center_mass, inertia=it, point = mp$point)
+}
+```
+
+For a given vertex ID, `override_mass_props()` finds all overrides that apply to that ID, and for each, applies the specified transformation to the mass. If requested, it also applies a scaling of the inertial tensor.
+
+In the following examples we compare a set of overrides to these baseline property sets:
+```{r, echo=FALSE}
+baseline=c("C.1", "C.1.1.1.1.3", "C.1.1.1.2.1")
+knitr::kable(sbs_table[is.element(sbs_table$id, baseline), ], digits=3)
+```
+
+### Example 1: Descope Assembly 3
+
+For this example, our overrides list is
+```{r, echo=FALSE}
+overrides <- read.csv("../jpl-wbs/overrides.csv", strip.white=TRUE, stringsAsFactors=FALSE)
+knitr::kable(overrides[overrides$example == 1, ])
+```
+
+We can update our definition of `update_mass_props()` or simply call `rollup()` with an anonymous update method as follows:
+
+```{r}
+sbs_table_ex_1 <- rbind(sbs_table) # copy
+sbs_table_ex_1 <-
+  rollup(sbs,
+         sbs_table_ex_1,
+         function(ds, parent_key, child_keys)
+           update_mass_props(
+             ds,
+             parent_key,
+             child_keys,
+             override =
+               function(ds, id, mp)
+                 override_mass_props(overrides[overrides$example == 1, ], ds, id, mp)
+           ),
+         validate_mass_props_table)
+```
+The result:
+```{r, echo=FALSE}
+knitr::kable(sbs_table_ex_1[is.element(sbs_table_ex_1$id, baseline), ], digits=3)
+```
+
+### Example 2: Assembly 3 2 kg Increase
+
+Overrides list:
+
+```{r, echo=FALSE}
+knitr::kable(overrides[overrides$example == 2, ])
+```
+
+Result:
+
+```{r, echo=FALSE}
+sbs_table_ex_2 <- rbind(sbs_table) # copy
+sbs_table_ex_2 <-
+  rollup(sbs,
+         sbs_table_ex_2,
+         function(ds, parent_key, child_keys)
+           update_mass_props(
+             ds,
+             parent_key,
+             child_keys,
+             override =
+               function(ds, id, mp)
+                 override_mass_props(overrides[overrides$example == 2, ], ds, id, mp)
+           ),
+         validate_mass_props_table)
+knitr::kable(sbs_table_ex_2[is.element(sbs_table_ex_2$id, baseline), ], digits=3)
+```
+
+### Example 3: Assembly 3 10% Reduction
+
+Overrides list:
+
+```{r, echo=FALSE}
+knitr::kable(overrides[overrides$example == 3, ])
+```
+
+Result:
+
+```{r, echo=FALSE}
+sbs_table_ex_3 <- rbind(sbs_table) # copy
+sbs_table_ex_3 <-
+  rollup(sbs,
+         sbs_table_ex_3,
+         function(ds, parent_key, child_keys)
+           update_mass_props(
+             ds,
+             parent_key,
+             child_keys,
+             override =
+               function(ds, id, mp)
+                 override_mass_props(overrides[overrides$example == 3, ], ds, id, mp)
+           ),
+         validate_mass_props_table)
+knitr::kable(sbs_table_ex_3[is.element(sbs_table_ex_3$id, baseline), ], digits=3)
+```
+
+### Example 4: Assembly 4 5 kg Replacement plus Example 3
+
+Overrides list:
+
+```{r, echo=FALSE}
+knitr::kable(overrides[is.element(overrides$example, c(3, 4)), ])
+```
+
+Result:
+
+```{r, echo=FALSE}
+sbs_table_ex_4 <- rbind(sbs_table) # copy
+sbs_table_ex_4 <-
+  rollup(sbs,
+         sbs_table_ex_4,
+         function(ds, parent_key, child_keys)
+           update_mass_props(
+             ds,
+             parent_key,
+             child_keys,
+             override =
+               function(ds, id, mp)
+                 override_mass_props(overrides[is.element(overrides$example, c(3, 4)), ], ds, id, mp)
+           ),
+         validate_mass_props_table)
+knitr::kable(sbs_table_ex_4[is.element(sbs_table_ex_4$id, baseline), ], digits=3)
+```
+
+### Example 5: Assembly 3/4 Trade Option 3
+
+```{r, echo=FALSE}
+knitr::kable(overrides[overrides$example == 5, ])
+```
+
+Result:
+
+```{r, echo=FALSE}
+sbs_table_ex_5 <- rbind(sbs_table) # copy
+sbs_table_ex_5 <-
+  rollup(sbs,
+         sbs_table_ex_5,
+         function(ds, parent_key, child_keys)
+           update_mass_props(
+             ds,
+             parent_key,
+             child_keys,
+             override =
+               function(ds, id, mp)
+                 override_mass_props(overrides[overrides$example == 5, ], ds, id, mp)
+           ),
+         validate_mass_props_table)
+knitr::kable(sbs_table_ex_5[is.element(sbs_table_ex_5$id, baseline), ], digits=3)
+```
+
+### Example 6: Assembly 3/4 Trade Option 4
+
+This example is identical to to Example 1 but it makes the choice between Assemblies 3 and 4 explicit. Overrides list:
+
+```{r, echo=FALSE}
+knitr::kable(overrides[overrides$example == 6, ])
+```
+
+Result:
+
+```{r, echo=FALSE}
+sbs_table_ex_6 <- rbind(sbs_table) # copy
+sbs_table_ex_6 <-
+  rollup(sbs,
+         sbs_table_ex_6,
+         function(ds, parent_key, child_keys)
+           update_mass_props(
+             ds,
+             parent_key,
+             child_keys,
+             override =
+               function(ds, id, mp)
+                 override_mass_props(overrides[overrides$example == 6, ], ds, id, mp)
+           ),
+         validate_mass_props_table)
+knitr::kable(sbs_table_ex_6[is.element(sbs_table_ex_6$id, baseline), ], digits=3)
+```
+## Subtracting Tare Properties
+
+Measuring the mass properties of an object empirically often involves the use of a fixture that attaches the object to the measuring device. The measurement therefore includes contributions from the object and the fixture. Measuring the fixture alone will give its contribution--called the _tare_. We can reformulate the mass property combining equations to yield the difference between the properties of the object and the tare:
+
+```{r}
+# subtract_tare(pm, pf)
+#
+# subtracts tare properties of a fixture (pf) from measured properties (pm)
+
+subtract_tare <- function(pm, pf) {
+  
+  mass <- pm$mass - pf$mass
+  
+  center_mass <- (pm$center_mass * (pf$mass + mass) - pf$mass * pf$center_mass) / mass
+  
+  df <- pf$center_mass - pm$center_mass
+  ddtf <- outer(df, df)
+  sssmf <- ddtf - sum(diag(ddtf)) * diag(3)
+  
+  dp <- center_mass - pm$center_mass
+  ddtp <- outer(dp, dp)
+  sssmp <- ddtp - sum(diag(ddtp)) * diag(3)
+  
+  inertia <- pm$inertia - pf$inertia + pf$mass * sssmf + mass * sssmp
+
+  list(
+    mass = mass,
+    center_mass = center_mass,
+    inertia = inertia,
+    point = pm$point
+  )
+}
+```
+
+In our mass properties example, Component C.1 has two children: C.1.1 and C.1.2. If we consider C.1.1 to be a fixture, we can subtract its properties from those of C.1 and the result should equal the properties of C.1.2.
+
+```{r}
+po <- subtract_tare(df_get_mass_props(sbs_table, 'C.1'), df_get_mass_props(sbs_table, 'C.1.1'))
+po
+```
+
+```{r}
+all.equal(po, df_get_mass_props(sbs_table, 'C.1.2'))
+```
+
+# Advanced Example: Monte Carlo Simulation
+
+It is a straightforward extension of existing capabilities to enable Monte Carlo simulation. We simply need a method that, given the elements of a single rollup, will repeatedly perturb all leaf elements, perform a rollup on the perturbed data, and collect the resulting top-level elements. Here is one such method:
+
+```{r}
+library(parallel)
+
+# monte_carlo_sample_rollup
+# take n samples of a top-level rollup by perturbing all leaves and performing the rollup
+#
+# n:        number of samples
+# update:   property update method as used in rollup()
+# tree:     tree as used in rollup()
+# table:    property table as used in rollup()
+# get:      property getter as used in rollup()
+# set:      property setter as used in rollup()
+# perturb   property perturbation method, called as perturb(property), returns perturbed property
+# validate: property table validator as used in rollup()
+# row:      row number of top-level element in table
+# cores:    number of cores to use for parallel execution
+
+monte_carlo_sample_rollup <- function(n, update, tree, table, get, set, perturb, validate, row, cores=2) {
+  
+  # cache loop invariants
+  
+  leaves <- names(V(tree)[degree(tree, mode="in") == 0])
+
+  # roll up n perturbations in parallel, collect specified rows
+  
+  do.call(rbind, mclapply(
+    1:n,
+    FUN = function(i) {
+      pt <- Reduce(
+        f = function(t, id) set(t, id, perturb(get(t, id))),
+        x = leaves,
+        init = table
+      )
+      rollup(tree, pt, update, validate)[row, ]
+    }, mc.cores=cores
+  ))
+  
+}
+```
+
+## Perturbing Mass Properties
+
+The sampling method above is general. As with `rollup()`, we configure it do to what we want by passing it functions as arguments.
+We have all the pieces we need for Monte Carlo simulation for mass properties except `perturb_mass_props()`. Here is a simple implementation:
+
+```{r}
+perturb_mass_props <- function(mp,
+                               mass_sd=0.0, mass_min=0.0,
+                               Cx_sd=0.0, Cy_sd=0.0, Cz_sd=0.0,
+                               x_sd=0.0, x_min=0.0, y_sd=0.0, y_min=0.0, z_sd=0.0, z_min=0.0,
+                               r_sd=0.0) {
+  list(
+    mass = perturb_mass(mp$mass, mass_sd, mass_min),
+    center_mass = perturb_center_mass(mp$center_mass, Cx_sd, Cy_sd, Cz_sd),
+    inertia = perturb_inertia_tensor(mp$inertia,
+                                            x_sd, x_min, y_sd, y_min, z_sd, z_min,
+                                            r_sd),
+    point = mp$point
+  )
+}
+```
+
+Perturbing mass and center of mass are straightforward:
+
+```{r}
+# perturb mass with a sample of mean zero and given sd, clamped below at min
+
+perturb_mass <- function(mass, sd, min = 0.0) {
+  max(rnorm(1, mass, sd), min)
+}
+
+# perturb center of mass with three samples of mean zero and given sds
+
+perturb_center_mass <- function(center_mass, x_sd, y_sd, z_sd) {
+  center_mass + c(rnorm(1, 0.0, x_sd), rnorm(1, 0.0, y_sd), rnorm(1, 0.0, z_sd))
+}
+```
+
+Perturbing the inertia tensor is not so straightforward because an inertia tensor is a real symmetric positive definite matrix whose eigenvalues (principal moments of inertia) satisfy the so-called triangle inequalities:
+
+$$ I_{xx} \leq I_{yy} + I_{zz} \\
+   I_{yy} \leq I_{xx} + I_{zz} \\
+   I_{zz} \leq I_{xx} + I_{yy} $$
+   
+Arbitrary perturbations of the elements of the inertia tensor $I$ may violate any of these constraints. As a simple example, we present a method that avoids this problem.
+
+The moments of a homogeneous unit mass [cuboid](https://en.wikipedia.org/wiki/List_of_moments_of_inertia) of dimensions $a$, $b$, and $c$ about its center of mass satisfy
+
+$$ \begin{bmatrix} I_{xx} \\ I_{yy} \\ I_{zz} \end{bmatrix} = M \begin{bmatrix}a^2 \\ b^2 \\ c^2 \end{bmatrix} $$
+where
+
+$$ M = \frac{1}{12} \begin{bmatrix} 0 & 1 & 1 \\ 1 & 0 & 1 \\ 1 & 1 & 0 \end{bmatrix} $$
+The inertia tensor $I$ for this cuboid in the coordinate system of its axes is
+
+$$ I = \begin{bmatrix} I_{xx} & 0 & 0 \\ 0 & I_{yy} & 0 \\ 0 & 0 & I_{zz} \end{bmatrix} $$
+
+The structure of $M$ ensures that the principal moments are positive and satisfy the triangle inequalities. $I$ is positive definite because its eigenvalues are positive.
+
+Let $R$ be a unitary $3 \times 3$ matrix. We can rotate the inertia tensor $I$ as follows:
+
+$$ A = R \begin{bmatrix} I_{xx} & 0 & 0 \\ 0 & I_{yy} & 0 \\ 0 & 0 & I_{zz} \end{bmatrix} R^T $$
+
+Rotations preserve eigenvalues, so every such $A$ is a valid inertia tensor. We can use these facts to create a procedure for perturbing an inertia tensor on physical principles.
+
+Given any arbitrary inertia tensor $A$, we can find a similarity transform such that
+
+$$ A = R D R^{-1} $$
+
+where $D$ is a diagonal matrix whose diagonal elements are eigenvalues (principal moments) of $A$ and $R$ is a matrix whose columns are eigenvectors of $A$. $A$ is real and symmetric and therefore its eigenvectors are mutually orthogonal. Every scalar multiple of an eigenvector of $A$ is also an eigenvector of $A$, so it is always possible to scale the columns of $R$ such that $\| R \| = 1$, and therefore $R$ is unitary, i.e., $R^T = R^{-1}$.
+
+We can solve for the dimensions of the equivalent cuboid whose inertia tensor is $D$ as
+
+$$ \begin{bmatrix}a^2 \\ b^2 \\ c^2 \end{bmatrix} = M^{-1} \begin{bmatrix} I_{xx} \\ I_{yy} \\ I_{zz} \end{bmatrix} $$
+We can then create a perturbed $A'$ that satisfies all constraints by perturbing the dimensions of the equivalent cuboid and/or perturbing the rotation matrix $R$.
+
+Perturbing the cuboid dimensions is straightforward; all that is required is that the values be positive. We then form
+
+$$ \begin{bmatrix} I'_{xx} \\ I'_{yy} \\ I'_{zz} \end{bmatrix} = M \begin{bmatrix} a'^2 \\ b'^2 \\ c'^2 \end{bmatrix} $$
+
+We cannot arbitrarily perturb $R$ because it is necessary for the perturbed $R'$ to be unitary. We note, however, the product of two rotation matrices is a rotation matrix. Consequently, we can define
+
+$$ R' = R Z $$
+where $Z$ is a "small" random rotation matrix. The code below illustrates a method for generating such a rotation.
+
+Finally,
+
+$$ A' = R' \begin{bmatrix} I'_{xx} & 0 & 0 \\ 0 & I'_{yy} & 0 \\ 0 & 0 & I'_{zz} \end{bmatrix} R'^T $$
+
+The`perturb_inertia_tensor()` method implements this procedure.
+
+```{r}
+# equivalent unit mass uniform cuboid dimensions and rotation
+
+cuboid_from_inertia_tensor <- {
+  minv <- matrix(c(-1, 1, 1,
+                    1,-1, 1,
+                    1, 1,-1), byrow = TRUE, nrow = 3) * 6
+  
+  function(it) {
+    eg <- eigen(it, symmetric=TRUE, only.values = FALSE)
+    
+    list(dims = sqrt(as.vector(minv %*% eg$values)),
+         rotation = eg$vector)
+  }
+}
+
+# inertia tensor of unit mass uniform cuboid with specified dimensions and rotation
+
+inertia_tensor_from_cuboid <- {
+  m <- matrix(c(0, 1, 1,
+                1, 0, 1,
+                1, 1, 0), byrow = TRUE, nrow = 3) / 12
+  xyz <- list("x", "y", "z")
+
+  function(dims, R) {
+    i <- R %*% diag(as.vector(m %*% matrix(dims^2, ncol = 1))) %*% t(R)
+    dimnames(i) <- list(xyz, xyz)
+    i
+  }
+}
+
+# random rotation matrix
+
+random_rotation <- function(x0, x1, x2) {
+  theta <- 2.0 * pi * x0
+  phi   <- 2.0 * pi * x1
+  z     <- 2.0 * x2
+  
+  r <- sqrt(z)
+  Vx <- sin(phi) * r
+  Vy <- cos(phi) * r
+  Vz <- sqrt(2.0 - z)
+  
+  st <- sin(theta)
+  ct <- cos(theta)
+  Sx <- Vx * ct - Vy * st
+  Sy <- Vx * st + Vy * ct
+  
+  matrix(
+    data = c(
+      Vx * Sx - ct, Vx * Sy - st, Vx * Vz,
+      Vy * Sx + st, Vy * Sy - ct, Vy * Vz,
+      Vz * Sx,      Vz * Sy,      1.0 - z
+    ),
+    nrow = 3,
+    byrow = TRUE
+  )
+}
+# perturb inertia tensor
+
+perturb_inertia_tensor <- function(it,
+                                   x_sd=0.0, x_min=0.0, y_sd=0.0, y_min=0.0, z_sd=0.0, z_min=0.0,
+                                   r_sd = 0.0) {
+  # get equivalent cuboid
+  
+  cuboid <- cuboid_from_inertia_tensor(it)
+  dims <- cuboid$dims
+  R <- cuboid$rotation
+  
+  # perturb cuboid dimensions
+  
+  dims_p <- c(max(rnorm(1, dims[1], x_sd), x_min),
+              max(rnorm(1, dims[2], y_sd), y_min),
+              max(rnorm(1, dims[3], z_sd), z_min))
+  
+  # perturb cuboid rotation
+  
+  r3 = runif(3) * c(r_sd, 1, r_sd)
+  R_p <- R %*% random_rotation(r3[1], r3[2], r3[3])
+  
+  # construct tensor
+  
+  inertia_tensor_from_cuboid(dims_p, R_p)
+}
+
+```
+```{r, echo=FALSE}
+A <- 1000 * random_mass_props()$inertia
+```
+As an example, consider the inertia tensor
+```{r}
+A
+```
+We can perturb its equivalent cuboid dimensions only:
+```{r}
+perturb_inertia_tensor(A, x_sd=0.1, x_min=0.001, y_sd=0.1, y_min=0.001, z_sd=0.1, z_min=0.001)
+```
+We can perturb its rotation only:
+```{r}
+perturb_inertia_tensor(A, r_sd=0.001)
+```
+We can perturb both:
+```{r}
+perturb_inertia_tensor(A, x_sd=0.1, x_min=0.001, y_sd=0.1, y_min=0.001, z_sd=0.1, z_min=0.001,
+                       r_sd=0.001)
+```
+
+
+Default perturbation arguments leave the tensor unchanged:
+```{r}
+all.equal(A, perturb_inertia_tensor(A))
+```
+
+Note: This method generates matrices that satisfy the physical and mathematical constraints on an inertia tensor; it has a meaningful interpretation in terms of the dimensions of an equivalent homogeneous cuboid and a rotation of its principal axes. Whether it is appropriate for Monte Carlo analysis of inertial properties of actual spacecraft depends on the precise meaning of uncertainty in moments and products of inertia and is best answered by mechanical engineers and/or physicists.
+
+Note: The claim that this algorithm produces valid inertia tensors is proven above (some details are left to reader) but also explicitly verified for each perturbation because our mass properties rollup validates every input before calculation.
+
+Note: The decomposition of each inertia tensor into its equivalent cuboid and rotation is invariant during Monte Carlo sampling. An obvious potential performance enhancement would be to cache those values before the main iteration. The required modifications are simple but do not contribute to clarity of exposition.
+
+##  Output
+
+### Samples
+
+```{r}
+elt <- system.time(
+  samples <- monte_carlo_sample_rollup(
+    10,
+    update_mass_props,
+    sbs, 
+    sbs_table,
+    df_get_mass_props,
+    df_set_mass_props,
+    function(mp) perturb_mass_props(mp,
+                                    mass_sd=0.1, mass_min=0.001,
+                                    Cx_sd=0.1, Cy_sd=0.1, Cz_sd=0.1,
+                                    x_sd=0.01, x_min=0.001,
+                                    y_sd=0.01, y_min=0.001,
+                                    z_sd=0.01, z_min=0.001,
+                                    r_sd=0.01),
+    function(tree, table) TRUE,     # assume validation passed before monte carlo
+    1,
+    detectCores())
+)
+knitr::kable(samples, digits=3)
+```
+```{r echo = FALSE}
+# Elapsed time: 973.594 s for 1000 Monte Carlo samples, approximately 1.0 sample/s.
+```
+
+Elapsed time: `r elt['elapsed']` s for `r nrow(samples)` Monte Carlo samples, approximately `r sprintf('%.1f', nrow(samples)/elt['elapsed'])` sample/s.
+
+### Statistical Summary
+
+```{r}
+library(psych)
+desc <- describe(samples[3:12], skew=FALSE)
+knitr::kable(desc[, 3:8], digits=3)
+```

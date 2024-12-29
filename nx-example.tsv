@@ -1,0 +1,4 @@
+id	component	mass	Cx	Cy	Cz	Ixx	Iyy	Izz	Ixy	Ixz	Iyz	POIconv	Ipoint
+Top	MetricBall/A1	NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	+	F
+Thing 1	1MeterDiameterBall/A1	518.873951146994	1.00	1.00	1.00	12.97184878	12.97184878	12.97184878	0.0	0.0	0.0	+	F
+Thing 2	1MeterDiameterBall/A1	518.873951146994	-1.00	-1.00	-1.00	12.97184878	12.97184878	12.97184878	0.0	0.0	0.0	+	F

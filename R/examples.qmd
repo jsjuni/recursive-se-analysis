@@ -1,0 +1,177 @@
+---
+title: "Examples"
+author: "J S Jenkins"
+date: "2023-09-07"
+format: html
+editor: visual
+---
+
+## Mass Properties Examples
+
+These examples came up in a discussion about the sign convention for products of inertia used in NX/Teamcenter. A Siemens rep gave a very definitive answer that NX uses the negative convention. That is contrary to our observations. In the course of the discussion we worked out a number of examples. I reproduced each with my demonstration code.
+
+The mass properties update code uses an `POIconv` parameter to indicate sign convention for any row in the mass properties table; it converts as necessary and produces results by default in the negative convention. Of course, it is trivial to convert the results to positive if desired.
+
+One reason for reproducing these examples was to check that I got the sign convention right. It appears I did.
+
+```{r echo = FALSE}
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(igraph))
+
+source("rollup.R")
+source("update_prop.R")
+source("mass-props.R")
+```
+
+### Division 31 Excel Example
+
+This example is from the Division 31 Mass Properties repository in JPL's Github. Although not important for the purpose of this demonstration, the inertia tensor component labeled "Thing 1" does not satisfy the triangle inequalities and cannot represent the inertia of a physically-realizable object. For that reason, `rollup()` is called with a validator that checks nothing.
+
+```{r}
+data <- as.data.frame(read_tsv("../31-excel-example.tsv", show_col_types = FALSE))
+tree <- graph_from_edgelist(matrix(c("Thing 1", "Top", "Thing 2", "Top"), nrow = 2, byrow = TRUE))
+result <- rollup(tree, data, update_mass_props, function(t, d) TRUE)
+target <- data.frame(
+  mass = 7.0,
+  Cx = -41.42857143, Cy = 742.5714286, Cz = -552.00,
+  Ixx = 55891735.71, Iyy = 113571623.71, Izz = 990366783.43,
+  Ixy = 6410475.71, Ixz = 1391080.00, Iyz = 6929625.00
+)
+knitr::kable(result, digits = 2)
+all.equal(target, result[1, names(target)], tolerance = 1e-5)
+```
+
+### Dan Coatta's Example
+
+> Can we make an example "part" in NX that consists of 2 point masses and then run a report on them?
+>
+> -   Mass 1: mass = 1kg, location = (1 m,1 m,1 m)
+>
+> -   Mass 2: mass = 1kg, location = (-1 m,-1 m,-1 m)
+>
+> Using the [positive]{.underline} convention, the Ixy, Ixz and Iyz will all equal 2 kg-m<sup>2</sup>.
+>
+> Using the [negative]{.underline} convention, the Ixy, Ixz and Iyz will all equal -2 kg-m<sup>2</sup>.
+>
+> That would be an easy way to check.
+
+We indicate point masses by setting `Ipoint` to `TRUE`.
+
+```{r}
+data <- as.data.frame(read_tsv("../coatta-example.tsv", show_col_types = FALSE))
+tree <- graph_from_edgelist(matrix(c("Mass 1", "Part", "Mass 2", "Part"), nrow = 2, byrow = TRUE))
+result <- rollup(tree, data, update_mass_props, validate_mass_props_table)
+target <- data.frame(
+  mass = 2,
+  Cx = 0, Cy = 0, Cz = 0,
+  Ixx = 4, Iyy = 4, Izz = 4,
+  Ixy = 2, Ixz = 2, Iyz = 2
+)
+knitr::kable(result)
+all.equal(target, result[1, names(target)], tolerance = 1e-5)
+```
+
+### Ken Olson's Example
+
+> I have two 500 MM diameter  steel balls, located at 1000, 1000, 1000 and -1000, -1000, -1000 (mm), respectively.
+
+```{r}
+data <- as.data.frame(read_tsv("../nx-example.tsv", show_col_types = FALSE))
+tree <- graph_from_edgelist(matrix(c("Thing 1", "Top", "Thing 2", "Top"), nrow = 2, byrow = TRUE))
+result <- rollup(tree, data, update_mass_props, validate_mass_props_table)
+target <- data.frame(
+  mass = 1037.747902293988,
+  Cx = 0, Cy = 0, Cz = 0,
+  Ixx = 2101.439502145326, Iyy = 2101.439502145326, Izz = 2101.439502145326,
+  Ixy = 1037.747902293988, Ixz = 1037.747902293988, Iyz = 1037.747902293988
+)
+knitr::kable(result)
+all.equal(target, result[1, names(target)], tolerance = 1e-5)
+```
+
+### Jeff Bautista's Examples
+
+> In the attached spreadsheet, I used the 20060293-1 1.75 inch cable cutter as a test part in each quadrant in XY plane. I moved the part to each quadrant to see the change in Pxy (yellow highlight). The 4 cases show NX uses POSITVE integral convention as the Pxy matches this graphic below. If the NEGATIVE format was used, the Pxy would all have opposite signs.
+>
+> ![](images/jeff-example.png){fig-align="left" width="400"}
+>
+> I also added calcs on rows 60-67 of each tab. This calculates the cutter assembly from the detailed parts. So, this also confirms the POSITIVE integral since I took the raw NX details and was able to replicate the POIs without switching the signs of the individual POIs.
+
+#### POI +X+Y
+
+```{r}
+data <- read.csv("../jeff-example+x+y.csv")
+tree <- graph_from_edgelist(matrix(c(data$id[2:8], rep("1", 7)), ncol = 2, byrow = FALSE))
+result <- rollup(tree, data, update_mass_props, validate_mass_props_table)
+target <- data.frame(
+  mass = 1.63542,
+  Cx = 855.885, Cy = 494.146, Cz = 116.587,
+  Ixx = 3500.09, Iyy = 6815.06, Izz = 7900.23,
+  Ixy = 2870.93, Ixz = -2217.21, Iyz = -1280.11
+)
+knitr::kable(result, digits = 3)
+all.equal(target, result[1, names(target)], tolerance = 1e-5)
+```
+
+#### POI -X+Y
+
+```{r}
+data <- read.csv("../jeff-example+x+y.csv") |> mutate(
+  Cx = -Cx,
+  Ixy = -Ixy,
+  Ixz = -Ixz
+)
+tree <- graph_from_edgelist(matrix(c(data$id[2:8], rep("1", 7)), ncol = 2, byrow = FALSE))
+result <- rollup(tree, data, update_mass_props, validate_mass_props_table)
+target <- data.frame(
+  mass = 1.63542,
+  Cx = -855.885, Cy = 494.146, Cz = 116.587,
+  Ixx = 3500.09, Iyy = 6815.06, Izz = 7900.23,
+  Ixy = -2870.93, Ixz = 2217.21, Iyz = -1280.11
+)
+knitr::kable(result, digits = 3)
+all.equal(target, result[1, names(target)], tolerance = 1e-5)
+```
+
+#### POI -X-Y
+
+```{r}
+w <- 2:8
+data <- read.csv("../jeff-example+x+y.csv") |> mutate(
+  Cx = -Cx,
+  Cy = -Cy,
+  Cz = 2 * weighted.mean(Cz[w], mass[w]) - Cz
+)
+tree <- graph_from_edgelist(matrix(c(data$id[2:8], rep("1", 7)), ncol = 2, byrow = FALSE))
+result <- rollup(tree, data, update_mass_props, validate_mass_props_table)
+target <- data.frame(
+  mass = 1.63542,
+  Cx = -855.885, Cy = -494.146, Cz = 116.587,
+  Ixx = 3500.09, Iyy = 6815.06, Izz = 7900.23,
+  Ixy = 2870.93, Ixz = -2217.21, Iyz = -1280.11
+)
+knitr::kable(result, digits = 3)
+all.equal(target, result[1, names(target)], tolerance = 1e-5)
+```
+
+#### POI +X-Y
+
+```{r}
+w <- 2:8
+data <- read.csv("../jeff-example+x+y.csv") |> mutate(
+  Cy = -Cy,
+  Cz = 2 * weighted.mean(Cz[w], mass[w]) - Cz,
+  Ixy = -Ixy,
+  Ixz = -Ixz
+)
+tree <- graph_from_edgelist(matrix(c(data$id[2:8], rep("1", 7)), ncol = 2, byrow = FALSE))
+result <- rollup(tree, data, update_mass_props, validate_mass_props_table)
+target <- data.frame(
+  mass = 1.63542,
+  Cx = 855.885, Cy = -494.146, Cz = 116.587,
+  Ixx = 3500.09, Iyy = 6815.06, Izz = 7900.23,
+  Ixy = -2870.93, Ixz = 2217.21, Iyz = -1280.11
+)
+knitr::kable(result, digits = 3)
+all.equal(target, result[1, names(target)], tolerance = 1e-5)
+```

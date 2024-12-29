@@ -1,0 +1,43 @@
+---
+title: "SAWE Mass Properties Uncertainty Example"
+author: "J S Jenkins"
+date: "2024-12-28"
+format: html
+editor: visual
+bibliography: references.bib
+---
+
+Input data transcribed from an example published in conference proceedings of the Society of Allied Weight Engineers [@zimmerman:05:sawe][^1]:
+
+[^1]: The authors do not indicate which sign convention for products of inertia they use. If interpreted using the negative convention, the analysis code finds at least one inertia tensor to violate the triangle inequalities. We therefore surmise they use the positive convention.
+
+```{r echo = FALSE}
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(igraph))
+
+source("rollup.R")
+source("update_prop.R")
+source("mass-props.R")
+```
+
+```{r}
+pt <- as.data.frame(read_tsv("../sawe-example/properties.tsv", show_col_types = FALSE))
+knitr::kable(pt, digits = 4, row.names = FALSE)
+```
+
+Mass properties and uncertainties for Combined element recalculated using the matrix formulations in R:
+
+```{r}
+el <- as.matrix(read_tsv("../sawe-example/edges.tsv", show_col_types = FALSE))
+tree <- graph_from_edgelist(el)
+result <- rollup(tree, pt, update_mass_props_and_unc, validate_mass_props_table)
+knitr::kable(result[3, ], digits = 4, row.names = FALSE)
+```
+
+All values agree within 0.2%.
+
+```{r}
+all.equal(pt[3, ], result[3, ], tolerance = 0.002)
+```
+
+The small discrepancies are likely due to truncation of published values and errors in hand calculations. The published Combined Mean Xcg value of 109.8657, for example, is incorrect. It is easily verified that the correct value (to four decimal places) is 109.8769.
