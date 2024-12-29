@@ -131,7 +131,7 @@ calculate_system <- function(df, selectors, system) {
     
     # roll up mass properties
     
-    data <- rollup(tree, data, update_mass_props_and_unc_plus, null_validator)
+    data <- rollup(tree, data, update_mass_props_and_unc, null_validator)
     
     # return totals
     

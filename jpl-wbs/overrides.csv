@@ -1,0 +1,9 @@
+  "name",                          "id",         "m",    "b",    "scale_it",  "example"
+  "Assembly 3 Descope",            "C.1.1.1.1.3",  0.0,    0.0,    T,           1
+  "Assembly 3 2kg Increase",       "C.1.1.1.1.3",  1.0,    2.0,    T,           2
+  "Assembly 3 10% Reduction",      "C.1.1.1.1.3",  0.9,    0.0,    T,           3
+  "Assembly 4 5kg Replacement",    "C.1.1.1.2.1",  0.0,    5.0,    T,           4
+  "Assembly 3/4 Trade Opt 3",      "C.1.1.1.1.3",  1.0,    0.0,    T,           5
+  "Assembly 3/4 Trade Opt 3",      "C.1.1.1.2.1",  0.0,    0.0,    T,           5
+  "Assembly 3/4 Trade Opt 4",      "C.1.1.1.1.3",  0.0,    0.0,    T,           6
+  "Assembly 3/4 Trade Opt 4",      "C.1.1.1.2.1",  1.0,    0.0,    T,           6
