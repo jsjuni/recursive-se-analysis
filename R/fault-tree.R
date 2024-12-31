@@ -9,10 +9,6 @@ df_set_fault_props <- function(df, id, v) {
   df_set_by_id(df, id, "prob", v$prob)
 }
 
-combine_fault_props <- function(vl) {
-  vl
-}
-
 override_fault_props <- function(df, id, vl) {
   op <- if (df_get_by_id(df, id, "type") == "and") "*" else "+"
   list(
@@ -30,7 +26,7 @@ update_fault_props <- function(ds, parent_key, child_keys) {
     sources = child_keys,
     set = df_set_fault_props,
     get = df_get_fault_props,
-    combine = combine_fault_props,
+    combine = function(vl) vl,
     override = override_fault_props
   )
 }
