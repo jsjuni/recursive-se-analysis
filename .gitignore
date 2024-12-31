@@ -234,3 +234,5 @@ tutorial_files
 examples_files
 R/images
 R/sawe-example_files
+mp-input.tsv
+*.zip
