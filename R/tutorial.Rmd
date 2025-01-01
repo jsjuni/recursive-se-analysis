@@ -2065,7 +2065,7 @@ assumptions:
 -   Every gate is associated with an intermediate event, and each
     gate/event pair can be represented by a single vertex in the tree.
 
--   Only gates of AND and OR are permitted.
+-   Only gates of type AND and OR are permitted.
 
 Our initial fault properties table is:
 
@@ -2102,18 +2102,17 @@ In most applications (e.g., mass properties), the combining operation
 requires only the values to be combined, and is therefore passed only
 those values as input. In the case of a fault tree, however, the input
 probabilities for an AND gate are multiplied, whereas for an OR gate
-they are summed. We can accommodate this situation by using the
-`override()` method. `override()` is passed the property table, the id
-of the target vertex, and the result of calling `combine()`. We can use
-a simple pass-through combiner and perform the actual combining
-operation in the override as follows:
+they are summed. We can accommodate this situation by using the override
+method. `override()` is passed the property table, the id of the target
+vertex, and the result of calling `combine()`. We use a simple
+pass-through combiner and perform the actual combining operation in the
+override as follows:
 
 ``` R
 override_fault_props <- function(df, id, vl) {
-  op <- if (df_get_by_id(df, id, "type") == "and") "*" else "+"
   list(
     prob = Reduce(
-      f = op,
+      f = if (df_get_by_id(df, id, "type") == "and") "*" else "+",
       Map(f = function(v) v$prob, vl)
     )
   )
