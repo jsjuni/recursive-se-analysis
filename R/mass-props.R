@@ -45,8 +45,7 @@ df_get_mass_props_and_unc <- function(df, id) {
 
 df_set_mass_props <- function(df, id, v) {
   m <- v$inertia
-  poi_conv = df_get_by_id(df, id, "POIconv")
-  poi_factor <- if (poi_conv == "-") 1 else -1
+  poi_factor <- if (v$poi_conv == "-") 1 else -1
   df %>% df_set_by_id(id, "mass", v$mass) %>%
   
     df_set_by_id(id, "Cx", v$center_mass[1]) %>%
@@ -60,7 +59,7 @@ df_set_mass_props <- function(df, id, v) {
     df_set_by_id(id, "Ixz", poi_factor * (m["x", "z"] + m["z", "x"]) / 2.0) %>%
     df_set_by_id(id, "Iyz", poi_factor * (m["y", "z"] + m["z", "y"]) / 2.0) %>%
 
-    df_set_by_id(id, "POIconv", poi_conv) %>%
+    df_set_by_id(id, "POIconv", v$poi_conv) %>%
     df_set_by_id(id, "Ipoint", v$point)
 }
 
@@ -161,6 +160,11 @@ combine_mass_props_and_unc <- function(vl) {
   r
 }
 
+df_override_mass_props <- function(ds, id, v) {
+  v$poi_conv <- df_get_by_id(ds, id, "POIconv")
+  v
+}
+
 sigma_moment_sq <- function(sigma_moment, m, sigma_m, d, sigma_c_m) {
   sigma_moment^2 +
     (2 * m * d[1] * sigma_c_m[1])^2 + 
@@ -241,7 +245,8 @@ update_mass_props <- function(ds, parent_key, child_keys) {
     sources = child_keys,
     set = df_set_mass_props,
     get = df_get_mass_props,
-    combine = combine_mass_props
+    combine = combine_mass_props,
+    override = df_override_mass_props
   )
 }
 
@@ -252,7 +257,8 @@ update_mass_props_and_unc <- function(ds, parent_key, child_keys) {
     sources = child_keys,
     set = df_set_mass_props_and_unc,
     get = df_get_mass_props_and_unc,
-    combine = combine_mass_props_and_unc
+    combine = combine_mass_props_and_unc,
+    override = df_override_mass_props
   )
 }
 
