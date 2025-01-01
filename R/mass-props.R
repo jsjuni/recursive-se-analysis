@@ -160,6 +160,8 @@ combine_mass_props_and_unc <- function(vl) {
   r
 }
 
+# peek into target properties to find desired POI convention
+
 df_override_mass_props <- function(ds, id, v) {
   v$poi_conv <- df_get_by_id(ds, id, "POIconv")
   v
