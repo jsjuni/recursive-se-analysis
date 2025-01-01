@@ -10,10 +10,9 @@ df_set_fault_props <- function(df, id, v) {
 }
 
 override_fault_props <- function(df, id, vl) {
-  op <- if (df_get_by_id(df, id, "type") == "and") "*" else "+"
   list(
     prob = Reduce(
-      f = op,
+      f = if (df_get_by_id(df, id, "type") == "and") "*" else "+",
       Map(f = function(v) v$prob, vl)
     )
   )
