@@ -237,4 +237,4 @@ R/sawe-example_files
 mp-input.tsv
 *.zip
 
-/.idea/
+/.idea/*
