@@ -196,6 +196,147 @@ sysml_create_feature_value <- function() {
   )
 }
 
+sysml_create_operator_expression <- function() {
+  uuid <- UUIDgenerate()
+  list(
+    `@type` = "OperatorExpression",
+    `@id` = uuid,
+    `isConstant` = FALSE,
+    `operator` = "-",
+    `isDerived` = FALSE,
+    `isImpliedIncluded` = FALSE,
+    `isAbstract` = FALSE,
+    `isComposite` = FALSE,
+    `ownedRelationship` = list(
+      list(
+        `@id` = NA # ParameterMembership id
+      ),
+      list(
+        `@id` = NA # ReturnParameterMembership id
+      )
+    ),
+    `aliasIds` = list(),
+    `isSufficient` = FALSE,
+    `isOrdered` = FALSE,
+    `isEnd` = FALSE,
+    `elementId` = uuid,
+    `isUnique` = TRUE,
+    `isVariable` = FALSE,
+    `owner` = list(
+      `@id` = NA # AttributeUsage id
+    ),
+    `isPortion` = FALSE,
+    `owningRelationship` = list(
+      `@id` = NA # FeatureValue id (for AttributeUsage)
+    ),
+    `isLibraryElement` = FALSE
+  )
+}
+
+sysml_create_parameter_membership <- function() {
+  id = UUIDgenerate()
+  list(
+    `@type` = "ParameterMembership",
+    `@id` = id,
+    `isImpliedIncluded` = FALSE,
+    `isImplied` = FALSE,
+    `ownedRelationship` = list(),
+    `aliasIds` = list(),
+    `memberElement` = list(
+      `@id` = NA # Feature id
+    ),
+    `source` = list(
+      list(
+        `@id` = NA # OperatorExpression id
+      )
+    ),
+    `target` = list(
+      list(
+        `@id` =  NA # Feature id
+      )
+    ),
+    `ownedRelatedElement` = list(
+      list(
+        `@id` = NA # Feature id
+      )
+    ),
+    `owningRelatedElement` = list(
+      `@id` = NA # OperatorExpression id
+    ),
+    `elementId` = id,
+    `memberName` = "x",
+    `visibility` = "private",
+    `isLibraryElement` = FALSE
+  )
+}
+
+sysml_create_return_parameter_membership <- function() {
+  id = UUIDgenerate()
+  list(
+    `@type` = "ReturnParameterMembership",
+    `@id` = id,
+    `isImpliedIncluded` = FALSE,
+    `isImplied` = FALSE,
+    `ownedRelationship` = list(),
+    `aliasIds` = list(),
+    `memberElement` = list(
+      `@id` = "7a6bc8e0-677e-43bc-988a-bb36ed27607b"
+    ),
+    `source` = list(
+      list(
+        `@id` = "27071c56-ab7f-4a4a-bd03-3e2f4967b1d5"
+      )
+    ),
+    `target` = list(
+      list(
+        `@id` = "7a6bc8e0-677e-43bc-988a-bb36ed27607b"
+      )
+    ),
+    `owningRelatedElement` = list(
+      `@id` = "27071c56-ab7f-4a4a-bd03-3e2f4967b1d5"
+    ),
+    `ownedRelatedElement` = list(
+      list(
+        `@id` = "7a6bc8e0-677e-43bc-988a-bb36ed27607b"
+      )
+    ),
+    `elementId` = id,
+    `memberName` = "result",
+    `visibility` = "public",
+    `isLibraryElement` = FALSE
+  )
+}
+
+sysml_create_feature <- function() {
+  id = UUIDgenerate()
+  list(
+    `@type` = "Feature",
+    `@id` = id,
+    `direction` = "out",
+    `isConstant` = false,
+    `isDerived` = false,
+    `isImpliedIncluded` = false,
+    `isAbstract` = false,
+    `isComposite` = false,
+    `ownedRelationship` = list(),
+    `aliasIds` = list(),
+    `isSufficient` = false,
+    `isOrdered` = false,
+    `elementId` = id,
+    `isEnd` = false,
+    `isUnique` = true,
+    `isVariable` = false,
+    `owner` = list(
+      `@id` = "27071c56-ab7f-4a4a-bd03-3e2f4967b1d5"
+    ),
+    `isPortion` = false,
+    `owningRelationship` = list(
+      `@id` = "0a18f170-03ee-4ae2-a9b8-545a4e50db73"
+    ),
+    `isLibraryElement` = false
+  )
+}
+
 sysml_set_by_id <- function(ds, id, property, value) {
   pa <- sysml_get_part_with_id(ds, id)
   if (is.null(pa)) stop(sprintf("no part for id %s", id))
