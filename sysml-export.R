@@ -318,9 +318,7 @@ sysml_create_feature <- function() {
     `isImpliedIncluded` = FALSE,
     `isAbstract` = FALSE,
     `isComposite` = FALSE,
-    `ownedRelationship` = list(
-      `@id` = NA # FeatureValue id
-    ),
+    `ownedRelationship` = list(),
     `aliasIds` = list(),
     `isSufficient` = FALSE,
     `isOrdered` = FALSE,
@@ -401,8 +399,6 @@ sysml_set_by_id <- function(ds, id, property, value) {
       
       oe[["ownedRelationship"]][[1]][["@id"]] <- pm_id
       oe[["ownedRelationship"]][[2]][["@id"]] <- rp_id
-      oe[["owner"]] <- au_id
-      oe[["owningRelationship"]] <- fv1_id
       ds[[oe_id]] <- oe
       
       pm[["memberElement"]][["@id"]] <- ft1_id
@@ -413,11 +409,11 @@ sysml_set_by_id <- function(ds, id, property, value) {
       ds[[pm_id]] <- pm
       
       ft1[["owner"]][["@id"]] <- oe_id
-      ft1[["ownedRelationship"]][[1]][["@id"]] <- fv1_id
+      ft1[["ownedRelationship"]] <- list(`@id` = fv1_id)
       ft1[["owningRelationship"]][["@id"]] <- pm_id
       ds[[ft1_id]] <- ft1
       
-      fv2[["memberElement"]][["id"]] <- lv_id
+      fv2[["memberElement"]][["@id"]] <- lv_id
       fv2[["source"]][[1]][["@id"]] <- ft1_id
       fv2[["target"]][[1]][["@id"]] <- lv_id
       fv2[["ownedRelatedElement"]][[1]][["@id"]] <- lv_id
@@ -447,8 +443,6 @@ sysml_set_by_id <- function(ds, id, property, value) {
       lv <- sysml_create_literal_rational(value)
       lv_id <- lv[["@id"]]
       
-      lv[["owner"]][["@id"]] <- au_id
-      lv[["owningRelationship"]][["@id"]] <- fv1_id
       ds[[lv_id]] <- lv
        
       lv
@@ -468,6 +462,8 @@ sysml_set_by_id <- function(ds, id, property, value) {
   fv1[["owningRelatedElement"]][["@id"]] <- au_id
   ds[[fv1_id]] <- fv1
   
+  lv_or_oe[["owner"]][["@id"]] <- au_id
+  lv_or_oe[["owningRelationship"]][["@id"]] <- fv1_id
   ds[[lv_or_oe_id]] <- lv_or_oe
 
   ds
