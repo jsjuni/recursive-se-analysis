@@ -367,47 +367,37 @@ sysml_set_by_id <- function(ds, id, property, value) {
     id <- fv[["@id"]]
     owned <- sysml_get_owned_related_element_ids(ds, id)
     for (o in owned) {
-      print(sprintf("delete %s", o))
       ds[[o]] <- NULL
     }
-    print(sprintf("delete %s", id))
     ds[[id]] <- NULL
   }
   
   fv1 <- sysml_create_feature_value()
   fv1_id <- fv1[["@id"]]
-  print(sprintf("fv1 %s", fv1_id))
   
   lv_or_oe  <- if (is.numeric(value)) {
     if (value < 0) {
       
       oe <- sysml_create_operator_expression()
       oe_id <- oe[["@id"]]
-      print(sprintf("oe %s", oe_id))
       
       pm <- sysml_create_parameter_membership()
       pm_id <- pm[["@id"]]
-      print(sprintf("pm %s", pm_id))
 
       ft1 <- sysml_create_feature()
       ft1_id <- ft1[["@id"]]
-      print(sprintf("ft1 %s", ft1_id))
 
       fv2 <- sysml_create_feature_value()
       fv2_id <- fv2[["@id"]]
-      print(sprintf("fv2 %s", fv2_id))
       
       lv <- sysml_create_literal_rational(abs(value))
       lv_id <- lv[["@id"]]
-      print(sprintf("negated lv %s", lv_id))
       
       rp <- sysml_create_return_parameter_membership()
       rp_id <- rp[["@id"]]
-      ds[[rp_id]] <- rp
       
       ft2 <- sysml_create_feature()
       ft2_id <- ft2[["@id"]]
-      ds[[ft2_id]] <- ft2
       
       oe[["ownedRelationship"]][[1]][["@id"]] <- pm_id
       oe[["ownedRelationship"]][[2]][["@id"]] <- rp_id
@@ -438,12 +428,24 @@ sysml_set_by_id <- function(ds, id, property, value) {
       lv[["owningRelationship"]][["@id"]] <- fv2_id
       ds[[lv_id]] <- lv
       
+      rp[["memberElement"]][["@id"]] <- ft2_id
+      rp[["source"]][[1]][["@id"]] <- oe_id
+      rp[["target"]][[1]][["@id"]] <- ft2_id
+      rp[["owningRelatedElement"]][["@id"]] <- oe_id
+      rp[["ownedRelatedElement"]][[1]][["@id"]] <- ft2_id
+      ds[[rp_id]] <- rp
+
+      ft2[["owner"]][["@id"]] <- oe_id
+      ft2[["owningRelationship"]][["@id"]] <- rp_id
+      ft2[["ownedRelationship"]] <- list()
+      ds[[ft2_id]] <- ft2
+      
       oe
+       
     } else {
 
       lv <- sysml_create_literal_rational(value)
       lv_id <- lv[["@id"]]
-      print(sprintf("lv %s", lv_id))
       
       lv[["owner"]][["@id"]] <- au_id
       lv[["owningRelationship"]][["@id"]] <- fv1_id
