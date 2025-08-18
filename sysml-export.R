@@ -66,7 +66,7 @@ sysml_get_attribute_values <- function(ds, attribute_usage) {
   Map(
     f = function(i) {
       fv = ds[[i[["target"]][[1]][["@id"]]]]
-      ifelse(fv[["@type"]] == "OperatorExpression", sysml_get_negated_rational(ds, fv), fv[["value"]])
+      if (fv[["@type"]] == "OperatorExpression") sysml_get_negated_rational(ds, fv) else fv[["value"]]
     },
     sysml_get_relations_with_source(ds, "FeatureValue", attribute_usage[["@id"]])
   )
@@ -280,24 +280,24 @@ sysml_create_return_parameter_membership <- function() {
     `ownedRelationship` = list(),
     `aliasIds` = list(),
     `memberElement` = list(
-      `@id` = "7a6bc8e0-677e-43bc-988a-bb36ed27607b"
+      `@id` = NA # Feature id
     ),
     `source` = list(
       list(
-        `@id` = "27071c56-ab7f-4a4a-bd03-3e2f4967b1d5"
+        `@id` = NA # OperatorExpression id
       )
     ),
     `target` = list(
       list(
-        `@id` = "7a6bc8e0-677e-43bc-988a-bb36ed27607b"
+        `@id` = NA # Feature id
       )
     ),
     `owningRelatedElement` = list(
-      `@id` = "27071c56-ab7f-4a4a-bd03-3e2f4967b1d5"
+      `@id` = NA # OperatorExpression id
     ),
     `ownedRelatedElement` = list(
       list(
-        `@id` = "7a6bc8e0-677e-43bc-988a-bb36ed27607b"
+        `@id` = NA # Feature id
       )
     ),
     `elementId` = id,
@@ -313,27 +313,43 @@ sysml_create_feature <- function() {
     `@type` = "Feature",
     `@id` = id,
     `direction` = "out",
-    `isConstant` = false,
-    `isDerived` = false,
-    `isImpliedIncluded` = false,
-    `isAbstract` = false,
-    `isComposite` = false,
-    `ownedRelationship` = list(),
+    `isConstant` = FALSE,
+    `isDerived` = FALSE,
+    `isImpliedIncluded` = FALSE,
+    `isAbstract` = FALSE,
+    `isComposite` = FALSE,
+    `ownedRelationship` = list(
+      `@id` = NA # FeatureValue id
+    ),
     `aliasIds` = list(),
-    `isSufficient` = false,
-    `isOrdered` = false,
+    `isSufficient` = FALSE,
+    `isOrdered` = FALSE,
     `elementId` = id,
-    `isEnd` = false,
-    `isUnique` = true,
-    `isVariable` = false,
+    `isEnd` = FALSE,
+    `isUnique` = TRUE,
+    `isVariable` = FALSE,
     `owner` = list(
-      `@id` = "27071c56-ab7f-4a4a-bd03-3e2f4967b1d5"
+      `@id` = NA # OperatorExpression id
     ),
-    `isPortion` = false,
+    `isPortion` = FALSE,
     `owningRelationship` = list(
-      `@id` = "0a18f170-03ee-4ae2-a9b8-545a4e50db73"
+      `@id` = NA # ParameterMembership or ReturnParameterMembership id
     ),
-    `isLibraryElement` = false
+    `isLibraryElement` = FALSE
+  )
+}
+
+sysml_get_owned_related_element_ids <- function(ds, id) {
+  Reduce(
+    f = function(l, i) union(append(l, i), sysml_get_owned_related_element_ids(ds, i)),
+    x = Map(
+      f = function(e) e[["@id"]],
+      union(
+        ds[[id]][["ownedRelationship"]],
+        ds[[id]][["ownedRelatedElement"]]
+      )
+    ),
+    init = list()
   )
 }
 
@@ -348,34 +364,110 @@ sysml_set_by_id <- function(ds, id, property, value) {
   # delete any existing values
   
   for (fv in sysml_get_relations_with_source(ds, "FeatureValue", au_id)) {
-    ds[[fv[["target"]][[1]][["@id"]]]] <- NULL
-    ds[[fv[["@id"]]]] <- NULL
+    id <- fv[["@id"]]
+    owned <- sysml_get_owned_related_element_ids(ds, id)
+    for (o in owned) {
+      print(sprintf("delete %s", o))
+      ds[[o]] <- NULL
+    }
+    print(sprintf("delete %s", id))
+    ds[[id]] <- NULL
   }
   
-  lv <- if (is.numeric(value)) {
-    sysml_create_literal_rational(value)
+  fv1 <- sysml_create_feature_value()
+  fv1_id <- fv1[["@id"]]
+  print(sprintf("fv1 %s", fv1_id))
+  
+  lv_or_oe  <- if (is.numeric(value)) {
+    if (value < 0) {
+      
+      oe <- sysml_create_operator_expression()
+      oe_id <- oe[["@id"]]
+      print(sprintf("oe %s", oe_id))
+      
+      pm <- sysml_create_parameter_membership()
+      pm_id <- pm[["@id"]]
+      print(sprintf("pm %s", pm_id))
+
+      ft1 <- sysml_create_feature()
+      ft1_id <- ft1[["@id"]]
+      print(sprintf("ft1 %s", ft1_id))
+
+      fv2 <- sysml_create_feature_value()
+      fv2_id <- fv2[["@id"]]
+      print(sprintf("fv2 %s", fv2_id))
+      
+      lv <- sysml_create_literal_rational(abs(value))
+      lv_id <- lv[["@id"]]
+      print(sprintf("negated lv %s", lv_id))
+      
+      rp <- sysml_create_return_parameter_membership()
+      rp_id <- rp[["@id"]]
+      ds[[rp_id]] <- rp
+      
+      ft2 <- sysml_create_feature()
+      ft2_id <- ft2[["@id"]]
+      ds[[ft2_id]] <- ft2
+      
+      oe[["ownedRelationship"]][[1]][["@id"]] <- pm_id
+      oe[["ownedRelationship"]][[2]][["@id"]] <- rp_id
+      oe[["owner"]] <- au_id
+      oe[["owningRelationship"]] <- fv1_id
+      ds[[oe_id]] <- oe
+      
+      pm[["memberElement"]][["@id"]] <- ft1_id
+      pm[["source"]][[1]][["@id"]] <- oe_id
+      pm[["target"]][[1]][["@id"]] <- ft1_id
+      pm[["ownedRelatedElement"]][[1]][["@id"]] <- ft1_id
+      pm[["owningRelatedElement"]][["@id"]] <- oe_id
+      ds[[pm_id]] <- pm
+      
+      ft1[["owner"]][["@id"]] <- oe_id
+      ft1[["ownedRelationship"]][[1]][["@id"]] <- fv1_id
+      ft1[["owningRelationship"]][["@id"]] <- pm_id
+      ds[[ft1_id]] <- ft1
+      
+      fv2[["memberElement"]][["id"]] <- lv_id
+      fv2[["source"]][[1]][["@id"]] <- ft1_id
+      fv2[["target"]][[1]][["@id"]] <- lv_id
+      fv2[["ownedRelatedElement"]][[1]][["@id"]] <- lv_id
+      fv2[["owningRelatedElement"]][["@id"]] <- ft1_id
+      ds[[fv2_id]] <- fv2
+      
+      lv[["owner"]] <- ft1_id
+      lv[["owningRelationship"]][["@id"]] <- fv2_id
+      ds[[lv_id]] <- lv
+      
+      oe
+    } else {
+
+      lv <- sysml_create_literal_rational(value)
+      lv_id <- lv[["@id"]]
+      print(sprintf("lv %s", lv_id))
+      
+      lv[["owner"]][["@id"]] <- au_id
+      lv[["owningRelationship"]][["@id"]] <- fv1_id
+      ds[[lv_id]] <- lv
+       
+      lv
+    }
   } else if (is.logical(value)) {
     sysml_create_literal_boolean(value)
   } else if (is.character(value)) {
     sysml_create_literal_string(value)
   }
-  lv_id <- lv[["@id"]]
   
-  fv <- sysml_create_feature_value()
-  fv_id <- fv[["@id"]]
+  lv_or_oe_id <- lv_or_oe[["@id"]]
   
-  lv[["owner"]][["@id"]] <- au_id
-  lv[["owningRelationship"]][["@id"]] <- fv_id
+  fv1[["memberElement"]] <- lv_or_oe_id
+  fv1[["source"]][[1]][["@id"]] <- au_id
+  fv1[["target"]][[1]][["@id"]] <- lv_or_oe_id
+  fv1[["ownedRelatedElement"]][[1]][["@id"]] <- lv_or_oe_id
+  fv1[["owningRelatedElement"]][["@id"]] <- au_id
+  ds[[fv1_id]] <- fv1
   
-  fv[["memberElement"]] <- lv_id
-  fv[["source"]][[1]][["@id"]] <- au_id
-  fv[["target"]][[1]][["@id"]] <- lv_id
-  fv[["ownedRelatedElement"]][[1]][["@id"]] <- lv_id
-  fv[["owningRelatedElement"]][["@id"]] <- au_id
-  
-  ds[[lv_id]] <- lv
-  ds[[fv_id]] <- fv
-  
+  ds[[lv_or_oe_id]] <- lv_or_oe
+
   ds
 }
 
