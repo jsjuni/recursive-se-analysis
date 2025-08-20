@@ -13,7 +13,7 @@ sysml_get_ids <- function(ds) {
   Map(
     f = function(i) i[["declaredShortName"]],
     Filter(
-      f = function(i) i[["@type"]] == "PartUsage",
+      f = function(i) i$`@type` == "PartUsage",
       ds
     )
   ) |> unlist() |> unname()
@@ -21,31 +21,31 @@ sysml_get_ids <- function(ds) {
 
 sysml_get_part_with_id <- function(ds, id) {
   Filter(
-    f = function(i) i[["@type"]] == "PartUsage" && i[["declaredShortName"]] == id,
+    f = function(i) i$`@type` == "PartUsage" && i[["declaredShortName"]] == id,
     ds
   )[[1]]
 }
 
 sysml_get_relations_with_source <- function(ds, type, source) {
   Filter(
-    f = function(i) i[["@type"]] == type && i[["source"]][[1]][["@id"]] == source,
+    f = function(i) i$`@type` == type && i[["source"]][[1]]$`@id` == source,
     ds
   )
 }
 
 sysml_get_relations_with_target <- function(ds, type, target) {
   Filter(
-    f = function(i) i[["@type"]] == type && i[["target"]][[1]][["@id"]] == target,
+    f = function(i) i$`@type` == type && i[["target"]][[1]]$`@id` == target,
     ds
   )
 }
 
 sysml_get_attribute_usages_for_part <- function(ds, part, attribute) {
   Filter(
-    f = function(i) i[["@type"]] == "AttributeUsage" && i[["declaredName"]] == attribute,
+    f = function(i) i$`@type` == "AttributeUsage" && i[["declaredName"]] == attribute,
     Map(
-      f = function(i) ds[[i[["target"]][[1]][["@id"]]]],
-      sysml_get_relations_with_source(ds, "FeatureMembership", part[["@id"]])
+      f = function(i) ds[[i[["target"]][[1]]$`@id`]],
+      sysml_get_relations_with_source(ds, "FeatureMembership", part$`@id`)
     )
   )
 }
@@ -53,11 +53,11 @@ sysml_get_attribute_usages_for_part <- function(ds, part, attribute) {
 sysml_get_negated_rational <- function(ds, operator_expression) {
   ft <- Map(
     f = function(i) ds[[unlist(i[["target"]])]],
-    sysml_get_relations_with_source(ds, "ParameterMembership", operator_expression[["@id"]])
+    sysml_get_relations_with_source(ds, "ParameterMembership", operator_expression$`@id`)
   )[[1]]
   lr <- Map(
     f = function(i) ds[[unlist(i[["target"]])]],
-    sysml_get_relations_with_source(ds, "FeatureValue", ft[["@id"]])
+    sysml_get_relations_with_source(ds, "FeatureValue", ft$`@id`)
   )[[1]]
   -lr[["value"]]
 }
@@ -65,10 +65,10 @@ sysml_get_negated_rational <- function(ds, operator_expression) {
 sysml_get_attribute_values <- function(ds, attribute_usage) {
   Map(
     f = function(i) {
-      fv = ds[[i[["target"]][[1]][["@id"]]]]
-      if (fv[["@type"]] == "OperatorExpression") sysml_get_negated_rational(ds, fv) else fv[["value"]]
+      fv = ds[[i[["target"]][[1]]$`@id`]]
+      if (fv$`@type` == "OperatorExpression") sysml_get_negated_rational(ds, fv) else fv[["value"]]
     },
-    sysml_get_relations_with_source(ds, "FeatureValue", attribute_usage[["@id"]])
+    sysml_get_relations_with_source(ds, "FeatureValue", attribute_usage$`@id`)
   )
 }
 
@@ -95,14 +95,14 @@ sysml_get_edgelist <- function(ds) {
     f = rbind,
     x = Map(
       f = function(i) data.frame(
-        child = ds[[i[["target"]][[1]][["@id"]]]][["declaredShortName"]],
-        parent = ds[[i[["source"]][[1]][["@id"]]]][["declaredShortName"]]
+        child = ds[[i[["target"]][[1]]$`@id`]][["declaredShortName"]],
+        parent = ds[[i[["source"]][[1]]$`@id`]][["declaredShortName"]]
       ),
       Filter(
         f = function(i) {
-          i[["@type"]] == "FeatureMembership" &&
-            ds[[i[["source"]][[1]][["@id"]]]][["@type"]] == "PartUsage" &&
-            ds[[i[["target"]][[1]][["@id"]]]][["@type"]] == "PartUsage"
+          i$`@type` == "FeatureMembership" &&
+            ds[[i[["source"]][[1]]$`@id`]]$`@type` == "PartUsage" &&
+            ds[[i[["target"]][[1]]$`@id`]]$`@type` == "PartUsage"
         },
         x = ds
       )
@@ -142,19 +142,19 @@ sysml_create_literal <- function(value) {
 
 sysml_create_literal_rational <- function(value) {
   lr <- sysml_create_literal(value)
-  lr[["@type"]] = "LiteralRational"
+  lr$`@type` = "LiteralRational"
   lr
 }
 
 sysml_create_literal_boolean <- function(value) {
   lr <- sysml_create_literal(value)
-  lr[["@type"]] = "LiteralBoolean"
+  lr$`@type` = "LiteralBoolean"
   lr
 }
 
 sysml_create_literal_string <- function(value) {
   lr <- sysml_create_literal(value)
-  lr[["@type"]] = "LiteralString"
+  lr$`@type` = "LiteralString"
   lr
 }
 
@@ -341,7 +341,7 @@ sysml_get_owned_related_element_ids <- function(ds, id) {
   Reduce(
     f = function(l, i) union(append(l, i), sysml_get_owned_related_element_ids(ds, i)),
     x = Map(
-      f = function(e) e[["@id"]],
+      f = function(e) e$`@id`,
       union(
         ds[[id]][["ownedRelationship"]],
         ds[[id]][["ownedRelatedElement"]]
@@ -357,12 +357,12 @@ sysml_set_by_id <- function(ds, id, property, value) {
   
   au <- sysml_get_attribute_usages_for_part(ds, pa, property)[[1]]
   if (is.null(au)) stop(sprintf("no property %s for part %s", property, id))
-  au_id <- au[["@id"]]
+  au_id <- au$`@id`
   
   # delete any existing values
   
   for (fv in sysml_get_relations_with_source(ds, "FeatureValue", au_id)) {
-    id <- fv[["@id"]]
+    id <- fv$`@id`
     owned <- sysml_get_owned_related_element_ids(ds, id)
     for (o in owned) {
       ds[[o]] <- NULL
@@ -371,68 +371,69 @@ sysml_set_by_id <- function(ds, id, property, value) {
   }
   
   fv1 <- sysml_create_feature_value()
-  fv1_id <- fv1[["@id"]]
+  fv1_id <- fv1$`@id`
   
   lv_or_oe  <- if (is.numeric(value)) {
     if (value < 0) {
       
       oe <- sysml_create_operator_expression()
-      oe_id <- oe[["@id"]]
+      oe_id <- oe$`@id`
       
       pm <- sysml_create_parameter_membership()
-      pm_id <- pm[["@id"]]
+      pm_id <- pm$`@id`
 
       ft1 <- sysml_create_feature()
-      ft1_id <- ft1[["@id"]]
+      ft1_id <- ft1$`@id`
 
       fv2 <- sysml_create_feature_value()
-      fv2_id <- fv2[["@id"]]
+      fv2_id <- fv2$`@id`
       
       lv <- sysml_create_literal_rational(abs(value))
-      lv_id <- lv[["@id"]]
+      lv_id <- lv$`@id`
       
       rp <- sysml_create_return_parameter_membership()
-      rp_id <- rp[["@id"]]
+      rp_id <- rp$`@id`
       
       ft2 <- sysml_create_feature()
-      ft2_id <- ft2[["@id"]]
+      ft2_id <- ft2$`@id`
       
-      oe[["ownedRelationship"]][[1]][["@id"]] <- pm_id
-      oe[["ownedRelationship"]][[2]][["@id"]] <- rp_id
+      oe$ownedRelationship[[1]]$`@id` <- pm_id
+      oe$ownedRelationship[[1]]$`@id` <- pm_id
+      oe[["ownedRelationship"]][[2]]$`@id` <- rp_id
       ds[[oe_id]] <- oe
       
-      pm[["memberElement"]][["@id"]] <- ft1_id
-      pm[["source"]][[1]][["@id"]] <- oe_id
-      pm[["target"]][[1]][["@id"]] <- ft1_id
-      pm[["ownedRelatedElement"]][[1]][["@id"]] <- ft1_id
-      pm[["owningRelatedElement"]][["@id"]] <- oe_id
+      pm[["memberElement"]]$`@id` <- ft1_id
+      pm[["source"]][[1]]$`@id` <- oe_id
+      pm[["target"]][[1]]$`@id` <- ft1_id
+      pm[["ownedRelatedElement"]][[1]]$`@id` <- ft1_id
+      pm[["owningRelatedElement"]]$`@id` <- oe_id
       ds[[pm_id]] <- pm
       
-      ft1[["owner"]][["@id"]] <- oe_id
+      ft1[["owner"]]$`@id` <- oe_id
       ft1[["ownedRelationship"]] <- list(`@id` = fv1_id)
-      ft1[["owningRelationship"]][["@id"]] <- pm_id
+      ft1[["owningRelationship"]]$`@id` <- pm_id
       ds[[ft1_id]] <- ft1
       
-      fv2[["memberElement"]][["@id"]] <- lv_id
-      fv2[["source"]][[1]][["@id"]] <- ft1_id
-      fv2[["target"]][[1]][["@id"]] <- lv_id
-      fv2[["ownedRelatedElement"]][[1]][["@id"]] <- lv_id
-      fv2[["owningRelatedElement"]][["@id"]] <- ft1_id
+      fv2[["memberElement"]]$`@id` <- lv_id
+      fv2[["source"]][[1]]$`@id` <- ft1_id
+      fv2[["target"]][[1]]$`@id` <- lv_id
+      fv2[["ownedRelatedElement"]][[1]]$`@id` <- lv_id
+      fv2[["owningRelatedElement"]]$`@id` <- ft1_id
       ds[[fv2_id]] <- fv2
       
       lv[["owner"]] <- ft1_id
-      lv[["owningRelationship"]][["@id"]] <- fv2_id
+      lv[["owningRelationship"]]$`@id` <- fv2_id
       ds[[lv_id]] <- lv
       
-      rp[["memberElement"]][["@id"]] <- ft2_id
-      rp[["source"]][[1]][["@id"]] <- oe_id
-      rp[["target"]][[1]][["@id"]] <- ft2_id
-      rp[["owningRelatedElement"]][["@id"]] <- oe_id
-      rp[["ownedRelatedElement"]][[1]][["@id"]] <- ft2_id
+      rp[["memberElement"]]$`@id` <- ft2_id
+      rp[["source"]][[1]]$`@id` <- oe_id
+      rp[["target"]][[1]]$`@id` <- ft2_id
+      rp[["owningRelatedElement"]]$`@id` <- oe_id
+      rp[["ownedRelatedElement"]][[1]]$`@id` <- ft2_id
       ds[[rp_id]] <- rp
 
-      ft2[["owner"]][["@id"]] <- oe_id
-      ft2[["owningRelationship"]][["@id"]] <- rp_id
+      ft2[["owner"]]$`@id` <- oe_id
+      ft2[["owningRelationship"]]$`@id` <- rp_id
       ft2[["ownedRelationship"]] <- list()
       ds[[ft2_id]] <- ft2
       
@@ -441,7 +442,7 @@ sysml_set_by_id <- function(ds, id, property, value) {
     } else {
 
       lv <- sysml_create_literal_rational(value)
-      lv_id <- lv[["@id"]]
+      lv_id <- lv$`@id`
       
       ds[[lv_id]] <- lv
        
@@ -453,17 +454,17 @@ sysml_set_by_id <- function(ds, id, property, value) {
     sysml_create_literal_string(value)
   }
   
-  lv_or_oe_id <- lv_or_oe[["@id"]]
+  lv_or_oe_id <- lv_or_oe$`@id`
   
   fv1[["memberElement"]] <- lv_or_oe_id
-  fv1[["source"]][[1]][["@id"]] <- au_id
-  fv1[["target"]][[1]][["@id"]] <- lv_or_oe_id
-  fv1[["ownedRelatedElement"]][[1]][["@id"]] <- lv_or_oe_id
-  fv1[["owningRelatedElement"]][["@id"]] <- au_id
+  fv1[["source"]][[1]]$`@id` <- au_id
+  fv1[["target"]][[1]]$`@id` <- lv_or_oe_id
+  fv1[["ownedRelatedElement"]][[1]]$`@id` <- lv_or_oe_id
+  fv1[["owningRelatedElement"]]$`@id` <- au_id
   ds[[fv1_id]] <- fv1
   
-  lv_or_oe[["owner"]][["@id"]] <- au_id
-  lv_or_oe[["owningRelationship"]][["@id"]] <- fv1_id
+  lv_or_oe[["owner"]]$`@id` <- au_id
+  lv_or_oe[["owningRelationship"]]$`@id` <- fv1_id
   ds[[lv_or_oe_id]] <- lv_or_oe
 
   ds
@@ -513,7 +514,7 @@ out_file <- args[2]
 # parse json input and stack into a data frame
 
 sysml <- read_json(in_file)
-names(sysml) <- Map(f = function(i) i[["@id"]], sysml)
+names(sysml) <- Map(f = function(i) i$`@id`, sysml)
 
 
 tree <- igraph::graph_from_edgelist(sysml_get_edgelist(sysml))
