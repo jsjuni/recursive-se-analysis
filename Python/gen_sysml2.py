@@ -6,6 +6,7 @@ Output: corresponding SysML v2 model in which each node is a part with mass prop
 Author: Hans Peter de Koning (DEKonsult)
 """
 import os
+from collections import namedtuple
 from typing import Optional, Union
 from datetime import datetime, timezone
 import csv
@@ -87,8 +88,10 @@ class MassPropertiesModel:
         self.node_dict : dict[str, Node] = dict()
 
     def read_nodes(self, node_details_file_path: str):
+        (basename, ext) = os.path.splitext(node_details_file_path)
+        delimiter = "," if ext == ".csv" else "\t"
         with (open(node_details_file_path, encoding="UTF8") as node_details_file):
-            csv_reader = csv.reader(node_details_file, delimiter=',')
+            csv_reader = csv.reader(node_details_file, delimiter=delimiter)
             header = next(csv_reader)
 
             LOGGER.debug(f"node_details_file header={header}")
@@ -189,13 +192,17 @@ if __name__ == "__main__":
     start_time_iso = start_time.isoformat(timespec="seconds").replace("+00:00", "Z")
     LOGGER.info(f"Run started at {start_time_iso}")
 
-    # nodes_file_path = "sm_table.csv"
-    nodes_file_path = "sm_table_rollup.csv"
+    Param = namedtuple("Param", ["csv_input", "sysml_output"])
+
+    # parameters = Param(csv_input="sm_table.csv", sysml_output="MassPropertiesSmallModel.sysml")
+    # parameters = Param(csv_input="sm_table_rollup.csv", sysml_output="MassPropertiesSmallModelRollup.sysml")
+    parameters = Param(csv_input="..\\mp-input.tsv", sysml_output="MassPropertiesModel.sysml")
+
+    # Generate a mass properties model
     mass_properties_model = MassPropertiesModel()
-    mass_properties_model.read_nodes(nodes_file_path)
+    mass_properties_model.read_nodes(parameters.csv_input)
     mass_properties_model.report_model()
-    # mass_properties_model.write_sysml2_model("MassPropertiesSmallModel.sysml")
-    mass_properties_model.write_sysml2_model("MassPropertiesSmallModelRollup.sysml")
+    mass_properties_model.write_sysml2_model(parameters.sysml_output)
 
     duration = datetime.now(timezone.utc) - start_time
     LOGGER.info(f"Finished in {duration.total_seconds()} s")
