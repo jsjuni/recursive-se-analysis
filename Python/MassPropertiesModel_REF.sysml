@@ -1,4 +1,4 @@
-package MassPropertiesModel {
+package MassPropertiesModel_REF {
     private import ScalarValues::Boolean;
     private import ScalarValues::Real;
     private import ScalarValues::String;

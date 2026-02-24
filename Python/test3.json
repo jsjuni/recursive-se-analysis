@@ -1,0 +1,185 @@
+[
+  {
+    "@type": "Package",
+    "@id": "d23c0b21-adeb-5779-b516-e7f78be0a904",
+    "elementId": "d23c0b21-adeb-5779-b516-e7f78be0a904",
+    "declaredName": "NegativeNumbersIssue",
+    "owningRelationship": { "@id": "faa69471-35af-53e8-b414-fb58aa7dcccf" },
+    "ownedRelationship": [
+      { "@id": "d1b24a8a-6d55-4d37-b8dd-bc6b3d3e944d" },
+      { "@id": "db44d1b7-4ea7-501c-888a-cab6b19885e6" }
+    ]
+  },
+  {
+    "@type": "NamespaceImport",
+    "@id": "d1b24a8a-6d55-4d37-b8dd-bc6b3d3e944d",
+    "elementId": "d1b24a8a-6d55-4d37-b8dd-bc6b3d3e944d",
+    "owningRelatedElement": { "@id": "d23c0b21-adeb-5779-b516-e7f78be0a904" },
+    "importedNamespace": { "@id": "40bb440c-5036-58e1-8675-5afccb8b8f1d", "@uri": "file:///C%3A/_repos_git/OML-SysML2/recursive-se-analysis/.venv/Lib/site-packages/syside/sysml.library/Kernel%20Libraries/Kernel%20Data%20Type%20Library/ScalarValues.kerml" }
+  },
+  {
+    "@type": "OwningMembership",
+    "@id": "db44d1b7-4ea7-501c-888a-cab6b19885e6",
+    "elementId": "db44d1b7-4ea7-501c-888a-cab6b19885e6",
+    "owningRelatedElement": { "@id": "d23c0b21-adeb-5779-b516-e7f78be0a904" },
+    "memberElement": { "@id": "5256ef20-987a-5b31-a64c-953a9ab9b2bb" },
+    "memberName": "Part1",
+    "ownedRelatedElement": [
+      { "@id": "5256ef20-987a-5b31-a64c-953a9ab9b2bb" }
+    ]
+  },
+  {
+    "@type": "PartDefinition",
+    "@id": "5256ef20-987a-5b31-a64c-953a9ab9b2bb",
+    "elementId": "5256ef20-987a-5b31-a64c-953a9ab9b2bb",
+    "declaredName": "Part1",
+    "owningRelationship": { "@id": "db44d1b7-4ea7-501c-888a-cab6b19885e6" },
+    "isVariation": false,
+    "ownedRelationship": [
+      { "@id": "9e876b36-95a4-5485-a672-82622cf4aa94" },
+      { "@id": "f1bdbcda-8c34-5e11-a4c5-24ea9da2f531" }
+    ]
+  },
+  {
+    "@type": "FeatureMembership",
+    "@id": "9e876b36-95a4-5485-a672-82622cf4aa94",
+    "elementId": "9e876b36-95a4-5485-a672-82622cf4aa94",
+    "owningRelatedElement": { "@id": "5256ef20-987a-5b31-a64c-953a9ab9b2bb" },
+    "memberElement": { "@id": "52275c3a-a231-51eb-895d-2658313f098c" },
+    "memberName": "att1",
+    "ownedRelatedElement": [
+      { "@id": "52275c3a-a231-51eb-895d-2658313f098c" }
+    ]
+  },
+  {
+    "@type": "AttributeUsage",
+    "@id": "52275c3a-a231-51eb-895d-2658313f098c",
+    "elementId": "52275c3a-a231-51eb-895d-2658313f098c",
+    "declaredName": "att1",
+    "owningRelationship": { "@id": "9e876b36-95a4-5485-a672-82622cf4aa94" },
+    "isVariable": true,
+    "isVariation": false,
+    "ownedRelationship": [
+      { "@id": "a4d6beba-d172-4568-a5d5-ebe7efbb4ac2" },
+      { "@id": "2e566860-4fee-46cf-83dc-b52013b0e8df" }
+    ]
+  },
+  {
+    "@type": "FeatureTyping",
+    "@id": "a4d6beba-d172-4568-a5d5-ebe7efbb4ac2",
+    "elementId": "a4d6beba-d172-4568-a5d5-ebe7efbb4ac2",
+    "owningRelatedElement": { "@id": "52275c3a-a231-51eb-895d-2658313f098c" },
+    "general": { "@id": "14c0aa22-5489-59b5-b438-ded26e83ba31", "@uri": "file:///C%3A/_repos_git/OML-SysML2/recursive-se-analysis/.venv/Lib/site-packages/syside/sysml.library/Kernel%20Libraries/Kernel%20Data%20Type%20Library/ScalarValues.kerml" },
+    "specific": { "@id": "52275c3a-a231-51eb-895d-2658313f098c" },
+    "type": { "@id": "14c0aa22-5489-59b5-b438-ded26e83ba31", "@uri": "file:///C%3A/_repos_git/OML-SysML2/recursive-se-analysis/.venv/Lib/site-packages/syside/sysml.library/Kernel%20Libraries/Kernel%20Data%20Type%20Library/ScalarValues.kerml" },
+    "typedFeature": { "@id": "52275c3a-a231-51eb-895d-2658313f098c" }
+  },
+  {
+    "@type": "FeatureValue",
+    "@id": "2e566860-4fee-46cf-83dc-b52013b0e8df",
+    "elementId": "2e566860-4fee-46cf-83dc-b52013b0e8df",
+    "owningRelatedElement": { "@id": "52275c3a-a231-51eb-895d-2658313f098c" },
+    "memberElement": { "@id": "cbe11438-2582-4d43-b9c0-7ba05afa6778" },
+    "ownedRelatedElement": [
+      { "@id": "cbe11438-2582-4d43-b9c0-7ba05afa6778" }
+    ]
+  },
+  {
+    "@type": "LiteralRational",
+    "@id": "cbe11438-2582-4d43-b9c0-7ba05afa6778",
+    "elementId": "cbe11438-2582-4d43-b9c0-7ba05afa6778",
+    "owningRelationship": { "@id": "2e566860-4fee-46cf-83dc-b52013b0e8df" },
+    "value": 1.2
+  },
+  {
+    "@type": "FeatureMembership",
+    "@id": "f1bdbcda-8c34-5e11-a4c5-24ea9da2f531",
+    "elementId": "f1bdbcda-8c34-5e11-a4c5-24ea9da2f531",
+    "owningRelatedElement": { "@id": "5256ef20-987a-5b31-a64c-953a9ab9b2bb" },
+    "memberElement": { "@id": "ca090332-a1aa-5c2c-bd20-873a5001f3f4" },
+    "memberName": "att2",
+    "ownedRelatedElement": [
+      { "@id": "ca090332-a1aa-5c2c-bd20-873a5001f3f4" }
+    ]
+  },
+  {
+    "@type": "AttributeUsage",
+    "@id": "ca090332-a1aa-5c2c-bd20-873a5001f3f4",
+    "elementId": "ca090332-a1aa-5c2c-bd20-873a5001f3f4",
+    "declaredName": "att2",
+    "owningRelationship": { "@id": "f1bdbcda-8c34-5e11-a4c5-24ea9da2f531" },
+    "isVariable": true,
+    "isVariation": false,
+    "ownedRelationship": [
+      { "@id": "552b3f9b-cbbe-48e7-8ba7-640bbd692645" },
+      { "@id": "af34f560-d41c-489f-a881-e1d88536c225" }
+    ]
+  },
+  {
+    "@type": "FeatureTyping",
+    "@id": "552b3f9b-cbbe-48e7-8ba7-640bbd692645",
+    "elementId": "552b3f9b-cbbe-48e7-8ba7-640bbd692645",
+    "owningRelatedElement": { "@id": "ca090332-a1aa-5c2c-bd20-873a5001f3f4" },
+    "general": { "@id": "14c0aa22-5489-59b5-b438-ded26e83ba31", "@uri": "file:///C%3A/_repos_git/OML-SysML2/recursive-se-analysis/.venv/Lib/site-packages/syside/sysml.library/Kernel%20Libraries/Kernel%20Data%20Type%20Library/ScalarValues.kerml" },
+    "specific": { "@id": "ca090332-a1aa-5c2c-bd20-873a5001f3f4" },
+    "type": { "@id": "14c0aa22-5489-59b5-b438-ded26e83ba31", "@uri": "file:///C%3A/_repos_git/OML-SysML2/recursive-se-analysis/.venv/Lib/site-packages/syside/sysml.library/Kernel%20Libraries/Kernel%20Data%20Type%20Library/ScalarValues.kerml" },
+    "typedFeature": { "@id": "ca090332-a1aa-5c2c-bd20-873a5001f3f4" }
+  },
+  {
+    "@type": "FeatureValue",
+    "@id": "af34f560-d41c-489f-a881-e1d88536c225",
+    "elementId": "af34f560-d41c-489f-a881-e1d88536c225",
+    "owningRelatedElement": { "@id": "ca090332-a1aa-5c2c-bd20-873a5001f3f4" },
+    "memberElement": { "@id": "1bd049f8-3e9e-4469-8e79-92f02758a8d6" },
+    "ownedRelatedElement": [
+      { "@id": "1bd049f8-3e9e-4469-8e79-92f02758a8d6" }
+    ]
+  },
+  {
+    "@type": "OperatorExpression",
+    "@id": "1bd049f8-3e9e-4469-8e79-92f02758a8d6",
+    "elementId": "1bd049f8-3e9e-4469-8e79-92f02758a8d6",
+    "owningRelationship": { "@id": "af34f560-d41c-489f-a881-e1d88536c225" },
+    "operator": "-",
+    "ownedRelationship": [
+      { "@id": "a1c960ba-81ee-4891-ac31-59fcbe70e293" }
+    ]
+  },
+  {
+    "@type": "ParameterMembership",
+    "@id": "a1c960ba-81ee-4891-ac31-59fcbe70e293",
+    "elementId": "a1c960ba-81ee-4891-ac31-59fcbe70e293",
+    "owningRelatedElement": { "@id": "1bd049f8-3e9e-4469-8e79-92f02758a8d6" },
+    "memberElement": { "@id": "d7c2b982-ff28-45e9-9b61-2b08face47c8" },
+    "ownedRelatedElement": [
+      { "@id": "d7c2b982-ff28-45e9-9b61-2b08face47c8" }
+    ]
+  },
+  {
+    "@type": "Feature",
+    "@id": "d7c2b982-ff28-45e9-9b61-2b08face47c8",
+    "elementId": "d7c2b982-ff28-45e9-9b61-2b08face47c8",
+    "owningRelationship": { "@id": "a1c960ba-81ee-4891-ac31-59fcbe70e293" },
+    "direction": "in",
+    "ownedRelationship": [
+      { "@id": "02ab685b-feef-45cf-ab5e-61952d03c0b8" }
+    ]
+  },
+  {
+    "@type": "FeatureValue",
+    "@id": "02ab685b-feef-45cf-ab5e-61952d03c0b8",
+    "elementId": "02ab685b-feef-45cf-ab5e-61952d03c0b8",
+    "owningRelatedElement": { "@id": "d7c2b982-ff28-45e9-9b61-2b08face47c8" },
+    "memberElement": { "@id": "7567aa83-02ed-4acf-bcaa-d740ef3c3941" },
+    "ownedRelatedElement": [
+      { "@id": "7567aa83-02ed-4acf-bcaa-d740ef3c3941" }
+    ]
+  },
+  {
+    "@type": "LiteralRational",
+    "@id": "7567aa83-02ed-4acf-bcaa-d740ef3c3941",
+    "elementId": "7567aa83-02ed-4acf-bcaa-d740ef3c3941",
+    "owningRelationship": { "@id": "02ab685b-feef-45cf-ab5e-61952d03c0b8" },
+    "value": 1.2
+  }
+]

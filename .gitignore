@@ -1,3 +1,6 @@
+## Environment settings
+*.env
+
 ## Core latex/pdflatex auxiliary files:
 *.aux
 *.lof
