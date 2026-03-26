@@ -104,24 +104,29 @@ class SysMLModel:
             LOGGER.debug(f"part_details_file header={header}")
 
             has_parent = "parent" in header
+            has_pid = "pid" in header
 
             # Copy header list into attribute_columns and remove non-attribute columns
             attribute_columns: list[str] = header[:]
-            for attr_name in ("id", "key", "name", "parent"):
+            for attr_name in ("id", "key", "name", "parent", "pid"):
                 try:
                     attribute_columns.remove(attr_name)
                 except Exception as e:
                     pass
             LOGGER.debug(f"attribute_columns={attribute_columns}")
 
-            # Reorder attributes
-            reindexed = []
-            half_len = len(attribute_columns)//2
-            for i in range(half_len):
-                reindexed.append(i)
-                reindexed.append(i+half_len)
-            attribute_columns = [attribute_columns[i] for i in reindexed]
-            LOGGER.debug(f"attribute_columns={attribute_columns}")
+            # Reorder attributes if not already in mass, sigma_mass order
+            if "mass" in attribute_columns:
+                i = attribute_columns.index("mass")
+                if i + 1 < len(attribute_columns) and attribute_columns[i+1] != "sigma_mass":
+                    reindexed = []
+                    half_len = len(attribute_columns)//2
+
+                    for i in range(half_len):
+                        reindexed.append(i)
+                        reindexed.append(i+half_len)
+                    attribute_columns = [attribute_columns[i] for i in reindexed]
+                    LOGGER.debug(f"attribute_columns={attribute_columns}")
 
             for record in csv_reader:
                 # LOGGER.debug(f"record={record}")
@@ -139,6 +144,8 @@ class SysMLModel:
 
                     if has_parent:
                         parent_short_name = record["parent"]
+                    elif has_pid:
+                        parent_short_name = record["pid"]
                     else:
                         # csv file has no parent column - construct parent
                         level = part_short_name.count(".")
