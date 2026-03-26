@@ -75,7 +75,7 @@ class SysMLProcessor:
             csv_path = f"{root}.csv"
         with open(csv_path, mode="w", encoding="utf8", newline="") as csv_file:
 
-            # header = ["shortName", "name", "parentShortName", "POIconv", "Ipoint",
+            # header = ["id", "name", "pid", "POIconv", "Ipoint",
             #         "mass", "Cx", "Cx_sigma", "Cx", "Cx_sigma", "Cz", "Cz_sigma",
             #         "Ixx", "Ixx_sigma", "Ixy", "Ixy_sigma", "Ixz", "Ixz_sigma", "Iyy", "Iyy_sigma", "Iyz", "Iyz_sigma", "Izz", "Izz_sigma"]
 
@@ -86,16 +86,16 @@ class SysMLProcessor:
 
                 row_dict: dict[str, any] = dict()
 
-                row_dict["shortName"] = elem.short_name
+                row_dict["id"] = elem.short_name
                 row_dict["name"] = elem.name
 
                 owning_ns = elem.owning_namespace
                 if row_count < 10:
                     LOGGER.debug("row_count={row_count} owning_ns={owning_ns}")
                 if isinstance(owning_ns, syside.PartUsage):
-                    row_dict["parentShortName"] = owning_ns.short_name
+                    row_dict["pid"] = owning_ns.short_name
                 else:
-                    row_dict["parentShortName"] = "NA"
+                    row_dict["pid"] = "NA"
 
                 for owned_elem in elem.owned_elements.collect():
                     if isinstance(owned_elem, syside.AttributeUsage):
@@ -136,6 +136,9 @@ if __name__ == "__main__":
         csv_file_path = sys.argv[2] if n_args > 2 else None
         sysml_processor = SysMLProcessor()
         sysml_processor.convert_sysml_to_csv(sysml_model_path, csv_file_path)
+
+        # LOGGER.info(f"Run MassPropsApp computation")
+        # os.popen(cmd=f"julia -m MassPropsApp {csv_file_path}", mode="r")
 
         elapsed_duration = datetime.now(timezone.utc) - start_time
         LOGGER.info(f"Run completed in {elapsed_duration.total_seconds()} s")
