@@ -1,4 +1,4 @@
-shortName,name,parentShortName,POIconv,Ipoint,mass,sigma_mass,Cx,sigma_Cx,Cy,sigma_Cy,Cz,sigma_Cz,Ixx,sigma_Ixx,Iyy,sigma_Iyy,Izz,sigma_Izz,Ixy,sigma_Ixy,Ixz,sigma_Ixz,Iyz,sigma_Iyz
+id,name,pid,POIconv,Ipoint,mass,sigma_mass,Cx,sigma_Cx,Cy,sigma_Cy,Cz,sigma_Cz,Ixx,sigma_Ixx,Iyy,sigma_Iyy,Izz,sigma_Izz,Ixy,sigma_Ixy,Ixz,sigma_Ixz,Iyz,sigma_Iyz
 C.1,System 1,NA,-,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA
 C.1.1,Segment 1,C.1,-,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA
 C.1.1.1,Element 1,C.1.1,-,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA,NA
